@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  ibmmq:
+    image: icr.io/ibm-messaging/mq:latest
+    environment:
+      LICENSE: accept
+      MQ_QMGR_NAME: QM1
+      MQ_APP_PASSWORD: passw0rd
+    ports:
+      - "1414:1414"
+      - "9443:9443"
+    restart: on-failure
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.104.0
+    volumes:
+      - ./otel-collector/config.yaml:/etc/otel-collector-config.yaml
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    ports:
+      - "4317:4317"   # OTLP gRPC (gateway + processor send here)
+      - "8889:8889"   # Prometheus scrape endpoint
+    depends_on:
+      - tempo
+    restart: on-failure
+
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo.yaml
+      - tempo-data:/tmp/tempo
+    ports:
+      - "3200:3200"   # Tempo HTTP API (Grafana datasource)
+    restart: on-failure
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    restart: on-failure
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_BASIC_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    ports:
+      - "3001:3000"   # 3001 to avoid conflict with tutorial-miniops-app on 3000
+    depends_on:
+      - tempo
+      - prometheus
+    restart: on-failure
+
+  gateway:
+    build: ./gateway
+    environment:
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_QUEUE: DEV.QUEUE.1
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+      SERVICE_NAME: gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+  processor:
+    build: ./processor
+    environment:
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_QUEUE: DEV.QUEUE.1
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+      SERVICE_NAME: processor
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+volumes:
+  tempo-data:

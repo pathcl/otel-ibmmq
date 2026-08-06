@@ -1,0 +1,52 @@
+{
+  "title": "OTel IBM MQ Baggage Lab",
+  "uid": "otel-ibmmq-lab",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "tags": ["otel", "ibmmq", "lab"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Messages Processed by Tenant",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "increase(messages_processed_total[$__rate_interval])",
+          "legendFormat": "tenant={{ tenant_id }}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Total Messages (all tenants)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(messages_processed_total[$__rate_interval]))",
+          "legendFormat": "total"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "traces",
+      "title": "Traces with Tenant Context",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 8 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceql",
+          "query": "{span[\"tenant.id\"] != \"\"}"
+        }
+      ]
+    }
+  ]
+}
