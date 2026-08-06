@@ -20,7 +20,7 @@ EOF
 
 cmd_up() {
   echo "==> Starting lab stack (IBM MQ + OTel Collector + Tempo + Prometheus + Grafana:3001)"
-  docker compose -f "$LAB_DIR/docker compose.yml" up -d --build
+  docker compose -f "$LAB_DIR/docker-compose.yml" up -d --build
 
   echo ""
   echo "==> Building tutorial plugin"
@@ -29,7 +29,7 @@ cmd_up() {
 
   echo ""
   echo "==> Starting tutorial Grafana (port 3000)"
-  docker compose -f "$PLUGIN_DIR/docker compose.yaml" up -d
+  docker compose -f "$PLUGIN_DIR/docker-compose.yaml" up -d
 
   echo ""
   echo "==> Starting webpack dev server (logs: /tmp/webpack-dev.log)"
@@ -53,10 +53,10 @@ cmd_up() {
 
 cmd_down() {
   echo "==> Stopping tutorial Grafana"
-  docker compose -f "$PLUGIN_DIR/docker compose.yaml" down
+  docker compose -f "$PLUGIN_DIR/docker-compose.yaml" down
 
   echo "==> Stopping lab stack"
-  docker compose -f "$LAB_DIR/docker compose.yml" down
+  docker compose -f "$LAB_DIR/docker-compose.yml" down
 
   if [ -f /tmp/webpack-dev.pid ]; then
     echo "==> Stopping webpack dev server (PID $(cat /tmp/webpack-dev.pid))"
@@ -67,10 +67,10 @@ cmd_down() {
 
 cmd_status() {
   echo "==> Tutorial stack"
-  docker compose -f "$PLUGIN_DIR/docker compose.yaml" ps
+  docker compose -f "$PLUGIN_DIR/docker-compose.yaml" ps
   echo ""
   echo "==> Lab stack"
-  docker compose -f "$LAB_DIR/docker compose.yml" ps
+  docker compose -f "$LAB_DIR/docker-compose.yml" ps
   echo ""
   if [ -f /tmp/webpack-dev.pid ]; then
     PID=$(cat /tmp/webpack-dev.pid)
@@ -86,7 +86,7 @@ cmd_status() {
 
 cmd_logs() {
   echo "==> Tailing lab stack logs (Ctrl+C to stop)"
-  docker compose -f "$LAB_DIR/docker compose.yml" logs -f
+  docker compose -f "$LAB_DIR/docker-compose.yml" logs -f
 }
 
 case "${1:-up}" in
