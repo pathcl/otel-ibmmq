@@ -11,6 +11,7 @@ import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
+import io.opentelemetry.context.propagation.TextMapGetter;
 
 import javax.jms.*;
 import java.io.IOException;
@@ -52,8 +53,16 @@ public class Gateway {
         // Extract incoming trace context from HTTP headers (enables distributed tracing
         // when the caller is also instrumented — safe no-op when headers are absent).
         Context parentCtx = otel.getPropagators().getTextMapPropagator()
-            .extract(Context.current(), exchange,
-                (carrier, key) -> carrier.getRequestHeaders().getFirst(key));
+            .extract(Context.current(), exchange, new TextMapGetter<HttpExchange>() {
+                @Override
+                public Iterable<String> keys(HttpExchange carrier) {
+                    return carrier.getRequestHeaders().keySet();
+                }
+                @Override
+                public String get(HttpExchange carrier, String key) {
+                    return carrier.getRequestHeaders().getFirst(key);
+                }
+            });
 
         // Attach business context as baggage. This is what propagates across the MQ boundary.
         Context ctx = Baggage.builder()
