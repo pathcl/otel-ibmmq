@@ -7,7 +7,7 @@ datasources:
     url: http://tempo:3200
     isDefault: false
     jsonData:
-      httpMethod: GET
+      httpMethod: POST
       serviceMap:
         datasourceUid: prometheus
       nodeGraph:
