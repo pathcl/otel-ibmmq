@@ -61,7 +61,7 @@ export function homeScene() {
       children: [
         new SceneFlexItem({
           minHeight: 500,
-          body: PanelBuilders.nodeGraph()
+          body: PanelBuilders.nodegraph()
             .setTitle('Service Graph')
             .setData(serviceMapRunner)
             .build(),
