@@ -83,6 +83,48 @@ services:
       - otel-collector
     restart: on-failure
 
+  # Pattern 1 — Pipeline: validator → enricher → processor
+  # gateway puts messages on DEV.QUEUE.1; each stage consumes and forwards downstream.
+  validator:
+    build: ./validator
+    environment:
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_IN_QUEUE: DEV.QUEUE.1
+      IBM_MQ_NEXT_QUEUE: DEV.QUEUE.2
+      IBM_MQ_DLQ: DEV.DEAD.LETTER.QUEUE
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+      SERVICE_NAME: validator
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+  enricher:
+    build: ./enricher
+    environment:
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_IN_QUEUE: DEV.QUEUE.2
+      IBM_MQ_NEXT_QUEUE: DEV.QUEUE.3
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+      SERVICE_NAME: enricher
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+  # Pattern 3 — Competing consumers: two processor instances drain the same queue.
+  # Both share SERVICE_NAME=processor so they appear as one node in the service graph.
+  # docker compose up --scale processor=2 adds more replicas at runtime.
   processor:
     build: ./processor
     environment:
@@ -91,10 +133,31 @@ services:
       IBM_MQ_PORT: "1414"
       IBM_MQ_QUEUE_MANAGER: QM1
       IBM_MQ_CHANNEL: DEV.APP.SVRCONN
-      IBM_MQ_QUEUE: DEV.QUEUE.1
+      IBM_MQ_QUEUE: DEV.QUEUE.3
       IBM_MQ_USER: app
       IBM_MQ_PASSWORD: passw0rd
       SERVICE_NAME: processor
+    deploy:
+      replicas: 2
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+  # Pattern 2 — Dead Letter Queue: validator sends invalid messages here.
+  # Send a request with X-Tenant-ID: bad-tenant to trigger this path.
+  dlq-handler:
+    build: ./dlq-handler
+    environment:
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_DLQ: DEV.DEAD.LETTER.QUEUE
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+      SERVICE_NAME: dlq-handler
     depends_on:
       - ibmmq
       - otel-collector
