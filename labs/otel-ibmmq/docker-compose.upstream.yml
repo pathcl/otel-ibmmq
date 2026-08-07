@@ -1,0 +1,34 @@
+# Middle-of-chain scenario: IBM MQ services receive trace context from an upstream system.
+#
+# Run with:
+#   docker compose -f docker-compose.yml -f docker-compose.upstream.yml up --build
+#
+# What changes vs the base stack:
+#   - upstream service is added as the true entry point of the trace
+#   - traffic-gen is redirected to upstream instead of gateway
+#   - gateway now receives traceparent + baggage from upstream and forwards them
+#     into IBM MQ without overwriting — it is no longer the trace origin
+#
+# Resulting trace shape:
+#   upstream.order (root)
+#     └── gateway.send
+#           └── validator.handle
+#                 └── enricher.handle
+#                       └── processor.handle
+
+services:
+  upstream:
+    build: ./upstream
+    environment:
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      GATEWAY_URL: http://gateway:8080/send
+      SERVICE_NAME: upstream
+    ports:
+      - "8081:8081"
+    depends_on:
+      - gateway
+      - otel-collector
+    restart: on-failure
+
+  traffic-gen:
+    command: ["-url", "http://upstream:8081/order", "-interval", "1s"]

@@ -40,18 +40,8 @@ public class Gateway {
             return;
         }
 
-        String tenantId = exchange.getRequestHeaders().getFirst("X-Tenant-ID");
-        String userId   = exchange.getRequestHeaders().getFirst("X-User-ID");
-
-        if (tenantId == null || tenantId.isBlank()) {
-            byte[] msg = "X-Tenant-ID header required\n".getBytes();
-            exchange.sendResponseHeaders(400, msg.length);
-            exchange.getResponseBody().write(msg);
-            return;
-        }
-
-        // Extract incoming trace context from HTTP headers (enables distributed tracing
-        // when the caller is also instrumented — safe no-op when headers are absent).
+        // Extract incoming trace context first — upstream baggage may already carry
+        // tenant.id, in which case X-Tenant-ID is optional (middle-of-chain mode).
         Context parentCtx = otel.getPropagators().getTextMapPropagator()
             .extract(Context.current(), exchange, new TextMapGetter<HttpExchange>() {
                 @Override
@@ -64,12 +54,40 @@ public class Gateway {
                 }
             });
 
-        // Attach business context as baggage. This is what propagates across the MQ boundary.
-        Context ctx = Baggage.builder()
-            .put("tenant.id", tenantId)
-            .put("user.id", userId != null ? userId : "anonymous")
-            .build()
-            .storeInContext(parentCtx);
+        // Prefer baggage values propagated by an upstream service; fall back to
+        // explicit headers when the gateway is itself the entry point of the chain.
+        Baggage upstreamBaggage = Baggage.fromContext(parentCtx);
+        String tenantId = upstreamBaggage.getEntryValue("tenant.id");
+        String userId   = upstreamBaggage.getEntryValue("user.id");
+
+        if (tenantId == null || tenantId.isBlank()) {
+            tenantId = exchange.getRequestHeaders().getFirst("X-Tenant-ID");
+        }
+        if (userId == null || userId.isBlank()) {
+            String h = exchange.getRequestHeaders().getFirst("X-User-ID");
+            userId = h != null ? h : "anonymous";
+        }
+
+        if (tenantId == null || tenantId.isBlank()) {
+            byte[] msg = "X-Tenant-ID header or upstream baggage required\n".getBytes();
+            exchange.sendResponseHeaders(400, msg.length);
+            exchange.getResponseBody().write(msg);
+            return;
+        }
+
+        // In middle-of-chain mode the upstream baggage is already in parentCtx —
+        // forwarding it unchanged preserves the original values set by the true entry
+        // point. In beginning-of-chain mode we create fresh baggage from the headers.
+        Context ctx;
+        if (upstreamBaggage.getEntryValue("tenant.id") != null) {
+            ctx = parentCtx;
+        } else {
+            ctx = Baggage.builder()
+                .put("tenant.id", tenantId)
+                .put("user.id", userId)
+                .build()
+                .storeInContext(parentCtx);
+        }
 
         Span span = tracer.spanBuilder("gateway.send")
             .setSpanKind(SpanKind.PRODUCER)
