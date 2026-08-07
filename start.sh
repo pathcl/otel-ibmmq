@@ -19,8 +19,8 @@ EOF
 }
 
 cmd_up() {
-  echo "==> Starting lab stack (IBM MQ + OTel Collector + Tempo + Prometheus + Grafana:3001)"
-  docker compose -f "$LAB_DIR/docker-compose.yml" up -d --build
+  echo "==> Starting lab stack — middle-of-chain scenario (upstream → gateway → IBM MQ pipeline)"
+  docker compose -f "$LAB_DIR/docker-compose.yml" -f "$LAB_DIR/docker-compose.upstream.yml" up -d --build
 
   echo ""
   echo "==> Building tutorial plugin"
@@ -44,11 +44,12 @@ cmd_up() {
   echo "    Tutorial Grafana (plugin):  http://localhost:3000"
   echo "    Lab Grafana (dashboard):    http://localhost:3001"
   echo "    Lab Prometheus:             http://localhost:9090"
-  echo "    Gateway (send messages):    http://localhost:8080"
+  echo "    Upstream (trace origin):    http://localhost:8081"
+  echo "    Gateway (MQ bridge):        http://localhost:8080"
   echo "    IBM MQ console:             https://localhost:9443  (admin / passw0rd)"
   echo ""
-  echo "Send a test message:"
-  echo "    curl -X POST http://localhost:8080/send -H 'X-Tenant-ID: acme' -H 'X-User-ID: user1'"
+  echo "Send a test message (enters at upstream — full middle-of-chain trace):"
+  echo "    curl -X POST http://localhost:8081/order -H 'X-Tenant-ID: acme' -H 'X-User-ID: user1'"
 }
 
 cmd_down() {
@@ -56,7 +57,7 @@ cmd_down() {
   docker compose -f "$PLUGIN_DIR/docker-compose.yaml" down
 
   echo "==> Stopping lab stack"
-  docker compose -f "$LAB_DIR/docker-compose.yml" down
+  docker compose -f "$LAB_DIR/docker-compose.yml" -f "$LAB_DIR/docker-compose.upstream.yml" down
 
   if [ -f /tmp/webpack-dev.pid ]; then
     echo "==> Stopping webpack dev server (PID $(cat /tmp/webpack-dev.pid))"
@@ -70,7 +71,7 @@ cmd_status() {
   docker compose -f "$PLUGIN_DIR/docker-compose.yaml" ps
   echo ""
   echo "==> Lab stack"
-  docker compose -f "$LAB_DIR/docker-compose.yml" ps
+  docker compose -f "$LAB_DIR/docker-compose.yml" -f "$LAB_DIR/docker-compose.upstream.yml" ps
   echo ""
   if [ -f /tmp/webpack-dev.pid ]; then
     PID=$(cat /tmp/webpack-dev.pid)
@@ -86,7 +87,7 @@ cmd_status() {
 
 cmd_logs() {
   echo "==> Tailing lab stack logs (Ctrl+C to stop)"
-  docker compose -f "$LAB_DIR/docker-compose.yml" logs -f
+  docker compose -f "$LAB_DIR/docker-compose.yml" -f "$LAB_DIR/docker-compose.upstream.yml" logs -f
 }
 
 case "${1:-up}" in
