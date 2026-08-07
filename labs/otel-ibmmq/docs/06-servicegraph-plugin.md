@@ -2,9 +2,9 @@
 
 ## What it does
 
-`tutorial-otelibmmqservicegraph-app` is a Grafana app plugin built with **Grafana Scenes**. It renders a live service graph showing how the `gateway` and `processor` services interact over IBM MQ, filterable by tenant.
+`otel-mq-app` is a Grafana app plugin built with **Grafana Scenes**. It renders a live service graph showing how the `gateway` and `processor` services interact over IBM MQ, filterable by tenant.
 
-URL: `http://localhost:3001/a/tutorial-otelibmmqservicegraph-app/home`
+URL: `http://localhost:3001/a/otel-mq-app/home`
 
 ## How the data flows
 
@@ -120,18 +120,18 @@ which matches every tenant. Selecting `acme` narrows to `tenant_id=~"acme"`.
 The plugin is unsigned (local dev build). Grafana allows it via:
 
 ```yaml
-GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: tutorial-otelibmmqservicegraph-app
+GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: otel-mq-app
 ```
 
 The `dist/` directory is volume-mounted into the Grafana container:
 
 ```yaml
 volumes:
-  - ./tutorial-otelibmmqservicegraph-app/dist:/var/lib/grafana/plugins/tutorial-otelibmmqservicegraph-app
+  - ./otel-mq-app/dist:/var/lib/grafana/plugins/otel-mq-app
 ```
 
 After changing plugin source, run `npm run build` inside
-`tutorial-otelibmmqservicegraph-app/` and restart the Grafana container.
+`otel-mq-app/` and restart the Grafana container.
 
 ## Sending traffic
 

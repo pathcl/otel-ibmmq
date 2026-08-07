@@ -1,5 +1,5 @@
 apiVersion: 1
 
 apps:
-  - type: tutorial-otelibmmqservicegraph-app
+  - type: otel-mq
     disabled: false
