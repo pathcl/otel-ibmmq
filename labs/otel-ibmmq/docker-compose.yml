@@ -38,6 +38,10 @@ services:
     image: prom/prometheus:latest
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.enable-remote-write-receiver'
+      - '--storage.tsdb.retention.time=7d'
     ports:
       - "9090:9090"
     restart: on-failure
@@ -48,9 +52,11 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
       GF_AUTH_BASIC_ENABLED: "false"
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: tutorial-otelibmmqservicegraph-app
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./tutorial-otelibmmqservicegraph-app/dist:/var/lib/grafana/plugins/tutorial-otelibmmqservicegraph-app
     ports:
       - "3001:3000"   # 3001 to avoid conflict with tutorial-miniops-app on 3000
     depends_on:
