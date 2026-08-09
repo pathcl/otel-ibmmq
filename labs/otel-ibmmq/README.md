@@ -98,7 +98,7 @@ done
 **Trace search** — in Grafana Explore → Tempo, use TraceQL:
 
 ```
-{span["tenant.id"] = "acme"}
+{ span.tenant.id = "acme" }
 ```
 
 **Middle scenario** trace shape:
@@ -164,4 +164,6 @@ Every design decision is explained in `docs/`:
 | [14-sre-baggage-checklist.md](docs/14-sre-baggage-checklist.md) | Staff SRE checklist: all APIs, patterns, and questions before team meetings |
 | [15-ibmmq-complete-guide.md](docs/15-ibmmq-complete-guide.md) | Complete IBM MQ reference: concepts, APIs, HA, security, internals, gotchas |
 | [ibmmq-101.md](docs/ibmmq-101.md) | IBM MQ on-ramp: mental model, four core objects, message anatomy, delivery guarantees, what to ignore |
+| [ibmmq-tutorial.md](docs/ibmmq-tutorial.md) | Hands-on lab journal: commands run, errors hit, and what the output taught us |
+| [ibmmq-qa.md](docs/ibmmq-qa.md) | Running Q&A log tagged #ibmmq and #o11y — reference books included |
 | [baggage-ibmmq-checklist.md](docs/baggage-ibmmq-checklist.md) | Middle-of-chain SRE checklist: SDK setup, PROPCTL, extract/inject pattern, silent bugs |

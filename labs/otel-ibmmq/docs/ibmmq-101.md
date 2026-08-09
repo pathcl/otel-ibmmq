@@ -50,16 +50,25 @@ Everything else is configuration of these four things.
 
 The fastest way to demystify IBM MQ. You already have it running in this lab.
 
-**Get a shell inside the MQ container with the MQ environment loaded:**
+**Get a shell inside the MQ container:**
 
 ```bash
-docker exec -it <mq-container> bash -c '. /opt/mqm/bin/setmqenv -s && bash'
+docker exec -it <mq-container> bash
 ```
 
 The sample binaries (`amqsput`, `amqsget`, `amqsbcg`) live at
-`/opt/mqm/samplebin/` and are not in `PATH` by default. Sourcing
-`setmqenv` adds them. If you exec without it you will get
-`command not found`.
+`/opt/mqm/samp/bin/` and are not in `PATH` by default. Add them once
+per session:
+
+```bash
+export PATH=$PATH:/opt/mqm/samp/bin:/opt/mqm/bin
+```
+
+Or call them with their full path:
+
+```bash
+/opt/mqm/samp/bin/amqsput DEV.QUEUE.1 QM1
+```
 
 **Connect to the queue manager:**
 
@@ -224,9 +233,11 @@ DISPLAY QMSTATUS                                # QM health
 DISPLAY QLOCAL(*) CURDEPTH                     # current depth of all queues
 ```
 
-Sample program commands (bash, not runmqsc — requires setmqenv sourced):
+Sample program commands (bash, not runmqsc — add `/opt/mqm/samp/bin` to PATH first):
 
 ```bash
+export PATH=$PATH:/opt/mqm/samp/bin:/opt/mqm/bin
+
 echo "payload" | amqsput DEV.QUEUE.1 QM1       # put a message
 amqsget DEV.QUEUE.1 QM1                        # get (destructive)
 amqsbcg DEV.QUEUE.1 QM1                        # dump raw bytes (non-destructive)

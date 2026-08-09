@@ -465,7 +465,7 @@ curl -X POST <entry-point-url> \
 ```
 Then query Tempo / Jaeger with:
 ```
-{resource.service.name=~".+" && span["tenant.id"]="sre-test"}
+{ resource.service.name =~ ".+" && span.tenant.id = "sre-test" }
 ```
 
 Expected: a **single trace** containing one span per service in the chain,
@@ -489,12 +489,22 @@ composite propagator includes `W3CBaggagePropagator`).
 
 Ask the MQ admin to run:
 ```
-DISPLAY QLOCAL(<queue-name>) PROPCTL
-DISPLAY CHANNEL(<channel-name>) PROPCTL
+DISPLAY QMGR PROPCTL
+DISPLAY QLOCAL(*) PROPCTL
+DISPLAY CHANNEL(*) PROPCTL
 ```
-Expected output: `PROPCTL(ALL)` for every queue and channel in the path.
-`PROPCTL(FORCE)` or `PROPCTL(COMPAT)` with `MQFMT_STRING` messages = context
-will not flow.
+Expected output: `PROPCTL(ALL)` for the queue manager, every queue, and every
+channel in the path. `PROPCTL(FORCE)` or `PROPCTL(COMPAT)` with `MQFMT_STRING`
+messages = context will not flow.
+
+If the queue manager default is not `ALL`, ask the MQ admin to set it so every
+new queue inherits the correct value automatically:
+```
+ALTER QMGR PROPCTL(ALL)
+```
+Note: this only applies to queues created after the change. All existing queues
+must be audited and fixed individually with `ALTER QLOCAL(<name>) PROPCTL(ALL)`.
+Do not forget the DLQ — context is most valuable when debugging failures.
 
 ### 6.4 MQRFH2 format check
 

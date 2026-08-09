@@ -96,21 +96,27 @@ correctly but `baggage.getEntryValue("tenant.id")` returns `null` everywhere.
 > tracing enabled for OTel context propagation to work. The only IBM MQ
 > configuration that matters is `PROPCTL`.
 
+- [ ] `PROPCTL(ALL)` set at **queue manager level** — covers all new queues automatically:
+      ```
+      ALTER QMGR PROPCTL(ALL)
+      ```
 - [ ] `PROPCTL(ALL)` on your **input queue** — without it, upstream properties
       are stripped before your service receives the message
 - [ ] `PROPCTL(ALL)` on your **output queue** — without it, your injected
       properties are stripped before delivery to the next consumer
 - [ ] `PROPCTL(ALL)` on any **channel** between queue managers in the path
+- [ ] `PROPCTL(ALL)` on the **DLQ** — you need context most when debugging failures
 - [ ] Message format is **not** `MQFMT_STRING` — that format discards the
       MQRFH2 header where properties are stored
 
-Verify with the MQ admin console or `runmqsc`:
+The queue manager default only covers queues created after the change. Audit
+all existing queues and fix any that are not `ALL`:
 
 ```
-DISPLAY QLOCAL(YOUR.QUEUE.NAME) PROPCTL
+DISPLAY QLOCAL(*) PROPCTL
 ```
 
-Must return `PROPCTL(ALL)`, not `NONE` or `COMPAT`.
+Must return `PROPCTL(ALL)` for every queue in the propagation path, not `NONE` or `COMPAT`.
 
 Dump a raw message to confirm properties survive the hop:
 
@@ -215,7 +221,7 @@ the upstream producer is missing `W3CBaggagePropagator` in its SDK config.
 In Tempo, query by tenant to verify end-to-end:
 
 ```
-{span["tenant.id"] = "acme"}
+{ span.tenant.id = "acme" }
 ```
 
 - Consumer span appears, linked to upstream → extract + parent linking correct
@@ -648,3 +654,79 @@ distributed traces linked to your application spans.
 `PROPCTL(ALL)` is an IBM MQ infrastructure requirement, not an application
 or agent requirement. Any approach that propagates context through JMS message
 properties needs it set on every queue and channel in the path.
+
+---
+
+### What is MQRFH2?
+
+MQRFH2 stands for "Rules and Formatting Header version 2." It is a structured
+binary header that IBM MQ prepends to the message body to carry named key-value
+properties. The MQMD (Message Descriptor) has fixed fields — you cannot add
+arbitrary properties to it. MQRFH2 is the only IBM MQ mechanism for carrying
+named properties alongside a message.
+
+JMS message properties map directly into the MQRFH2 `<usr>` folder. OTel's
+carrier adapter writes `traceparent` and `baggage` as JMS message properties;
+JMS maps them to MQRFH2; the next JMS consumer reads them back transparently.
+
+### How many IBM MQ header types exist?
+
+| Header | Format field value | What it carries |
+|--------|--------------------|----------------|
+| MQMD | always present | Fixed envelope: MsgId, CorrelId, timestamp, persistence, expiry |
+| MQRFH | `MQHRF   ` | Version 1 — older, rarely used |
+| MQRFH2 | `MQHRF2  ` | Version 2 — JMS properties, OTel headers, `<usr>` folder |
+| MQDLH | `MQDEAD  ` | Dead Letter Header — added when a message lands on the DLQ |
+| MQCIH | `MQCICS  ` | CICS bridge — mainframe integration only |
+| MQIIH | `MQIMS   ` | IMS bridge — mainframe integration only |
+| MQXQH | `MQXMIT  ` | Transmission queue header — added when routing between queue managers |
+
+For OTel context propagation, only MQRFH2 matters.
+
+### How do you tell if MQRFH2 is present?
+
+Two ways using `amqsbcg`:
+
+**1. MQMD Format field:**
+```
+Format : 'MQHRF2  '   ← MQRFH2 present, properties intact
+Format : 'MQSTR   '   ← plain string, MQRFH2 absent
+```
+
+**2. First bytes of the message body in the hex dump:**
+```
+00000000:  5246 4820 ...   'RFH ......'   ← MQRFH2 struct starts here
+```
+If the body starts with your payload bytes instead of `RFH `, there is no MQRFH2.
+
+### Why must MQRFH2 be used — is there an alternative?
+
+No alternative for carrying named properties through IBM MQ. You could embed
+properties in the body (JSON, custom format), but then every consumer must parse
+your custom format and OTel's standard carrier adapter would not work. MQRFH2 is
+the IBM MQ standard — the JMS API handles it transparently and OTel's inject/
+extract operates against JMS properties, which map to MQRFH2 automatically.
+
+### Is MQRFH2 specific to a particular IBM MQ version?
+
+MQRFH2 as a format has existed since IBM MQ 5.3 (~2002) — the header structure
+itself is not a version concern. However, **`PROPCTL` was introduced in IBM MQ
+7.0**. Any queue manager older than 7.0 cannot preserve MQRFH2 properties and
+therefore cannot support OTel context propagation at all.
+
+This is mostly theoretical: IBM MQ 7.x is entirely out of support:
+
+| Version | End of IBM support |
+|---------|--------------------|
+| 7.0 | September 2015 |
+| 7.1 | September 2016 |
+| 7.5 | September 2018 |
+| 8.0 | April 2020 |
+
+**IBM MQ 9.x LTS is the only version you should be running in production.**
+9.3 is the current Long Term Support release. The OpenTelemetry Java SDK has no
+IBM MQ version requirement of its own — it operates through the JMS API, which
+has been stable across all 9.x releases.
+
+If you are running 8.x or earlier: the OTel mechanism may work, but you have
+a much larger problem than observability — you are running unsupported software.
