@@ -1,0 +1,914 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>IBM MQ Baggage Propagation — Decision Guide</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg:          #0d1117;
+    --surface:     #161b22;
+    --surface-2:   #1c2128;
+    --border:      #30363d;
+    --border-soft: #21262d;
+    --text:        #e6edf3;
+    --text-muted:  #8b949e;
+    --text-dim:    #484f58;
+
+    --green:       #3fb950;
+    --green-bg:    #0d2818;
+    --green-border:#1a4428;
+    --amber:       #d29922;
+    --amber-bg:    #2a1f00;
+    --amber-border:#3d2e00;
+    --red:         #f85149;
+    --red-bg:      #2a0e0c;
+    --red-border:  #3d1a18;
+    --blue:        #388bfd;
+    --blue-bg:     #051d35;
+    --blue-border: #0c3166;
+    --purple:      #8957e5;
+    --purple-bg:   #1a1035;
+
+    --radius-sm:  3px;
+    --radius:     6px;
+    --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg:          #f6f8fa;
+      --surface:     #ffffff;
+      --surface-2:   #f0f2f4;
+      --border:      #d0d7de;
+      --border-soft: #e8ecf0;
+      --text:        #1f2328;
+      --text-muted:  #636c76;
+      --text-dim:    #b0b8c1;
+      --green-bg:    #dafbe1;
+      --green-border:#aef2bd;
+      --amber-bg:    #fff8c5;
+      --amber-border:#f0d070;
+      --red-bg:      #ffd7d5;
+      --red-border:  #ffb8b5;
+      --blue-bg:     #ddf4ff;
+      --blue-border: #80ccff;
+      --purple-bg:   #fbefff;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg:          #f6f8fa;
+    --surface:     #ffffff;
+    --surface-2:   #f0f2f4;
+    --border:      #d0d7de;
+    --border-soft: #e8ecf0;
+    --text:        #1f2328;
+    --text-muted:  #636c76;
+    --text-dim:    #b0b8c1;
+    --green-bg:    #dafbe1;
+    --green-border:#aef2bd;
+    --amber-bg:    #fff8c5;
+    --amber-border:#f0d070;
+    --red-bg:      #ffd7d5;
+    --red-border:  #ffb8b5;
+    --blue-bg:     #ddf4ff;
+    --blue-border: #80ccff;
+    --purple-bg:   #fbefff;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 32px 16px 80px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  header {
+    max-width: 720px;
+    margin: 0 auto 40px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  header p {
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  /* Breadcrumb */
+  #breadcrumb {
+    max-width: 720px;
+    margin: 0 auto 28px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    min-height: 24px;
+  }
+  .crumb {
+    font-size: 12px;
+    font-family: var(--mono);
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    transition: color 0.1s, background 0.1s;
+  }
+  .crumb:hover { color: var(--blue); background: var(--blue-bg); }
+  .crumb-sep { color: var(--text-dim); font-size: 11px; }
+  .crumb.active { color: var(--text-muted); cursor: default; }
+  .crumb.active:hover { background: none; color: var(--text-muted); }
+
+  /* Main card */
+  #card {
+    max-width: 720px;
+    margin: 0 auto;
+    animation: fadein 0.18s ease;
+  }
+  @keyframes fadein { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform:none; } }
+
+  .question-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px 28px;
+    margin-bottom: 12px;
+  }
+  .question-label {
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+  }
+  .question-text {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.4;
+    text-wrap: balance;
+    margin-bottom: 12px;
+  }
+  .question-info {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--mono);
+    background: var(--surface-2);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    line-height: 1.5;
+  }
+  .question-info code {
+    color: var(--blue);
+    font-size: 11px;
+  }
+
+  /* Options */
+  .options { display: flex; flex-direction: column; gap: 8px; }
+  .option {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    cursor: pointer;
+    transition: border-color 0.12s, background 0.12s;
+    text-align: left;
+    width: 100%;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 14px;
+  }
+  .option:hover {
+    border-color: var(--blue);
+    background: var(--blue-bg);
+  }
+  .option:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 1px;
+  }
+  .option-icon {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    margin-top: 1px;
+    transition: border-color 0.12s;
+  }
+  .option:hover .option-icon { border-color: var(--blue); }
+  .option-content { flex: 1; }
+  .option-label {
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+  .option-sublabel {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--mono);
+  }
+  .option-badge {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-family: var(--mono);
+    padding: 2px 7px;
+    border-radius: 20px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    margin-top: 2px;
+    align-self: flex-start;
+  }
+  .badge-blocker { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+  .badge-high    { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
+  .badge-medium  { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
+  .badge-low     { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+  .badge-zero    { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border); }
+  .badge-warn    { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
+
+  /* Result */
+  .result-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .result-header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .result-header.achievable { border-left: 3px solid var(--green); }
+  .result-header.caution    { border-left: 3px solid var(--amber); }
+  .result-header.blocker    { border-left: 3px solid var(--red); }
+  .result-title {
+    font-size: 15px;
+    font-weight: 600;
+    flex: 1;
+    line-height: 1.3;
+  }
+  .result-effort {
+    font-size: 11px;
+    font-family: var(--mono);
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+  .result-body { padding: 24px 28px; display: flex; flex-direction: column; gap: 20px; }
+  .section-heading {
+    font-size: 11px;
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+  .step-list { display: flex; flex-direction: column; gap: 8px; }
+  .step {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .step-num {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-family: var(--mono);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 1px;
+  }
+  .step-text { color: var(--text); }
+  .step-text code {
+    font-family: var(--mono);
+    font-size: 11px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-soft);
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    color: var(--blue);
+  }
+
+  .gotcha-list { display: flex; flex-direction: column; gap: 8px; }
+  .gotcha {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 10px 14px;
+    background: var(--amber-bg);
+    border: 1px solid var(--amber-border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+  }
+  .gotcha-icon { color: var(--amber); flex-shrink: 0; font-size: 13px; margin-top: 1px; }
+
+  .blocker-list { display: flex; flex-direction: column; gap: 8px; }
+  .blocker-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 10px 14px;
+    background: var(--red-bg);
+    border: 1px solid var(--red-border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+  }
+  .blocker-icon { color: var(--red); flex-shrink: 0; font-size: 13px; margin-top: 1px; }
+
+  .info-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 10px 14px;
+    background: var(--blue-bg);
+    border: 1px solid var(--blue-border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+  }
+  .info-icon { color: var(--blue); flex-shrink: 0; font-size: 13px; margin-top: 1px; }
+
+  .result-actions {
+    padding: 16px 28px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+  }
+  .btn {
+    font-size: 13px;
+    font-family: var(--sans);
+    padding: 7px 16px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    font-weight: 500;
+    transition: background 0.1s, border-color 0.1s;
+    color: var(--text);
+    background: var(--surface-2);
+  }
+  .btn:hover { border-color: var(--blue); background: var(--blue-bg); color: var(--blue); }
+  .btn-primary {
+    background: var(--blue);
+    border-color: var(--blue);
+    color: #fff;
+  }
+  .btn-primary:hover { opacity: 0.88; color: #fff; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>IBM MQ — Baggage &amp; Context Propagation</h1>
+  <p>Decision guide for mid-chain scenarios. Answer each question to get a specific implementation path.</p>
+</header>
+
+<div id="breadcrumb"></div>
+<div id="card"></div>
+
+<script>
+// ─── State machine ─────────────────────────────────────────────────────────
+
+const STATES = {
+
+  start: {
+    q: "What IBM MQ API does the producer/consumer use?",
+    info: "Check: <code>pom.xml</code> → JMS &nbsp;|&nbsp; <code>go.mod</code> → MQI-Go &nbsp;|&nbsp; <code>requirements.txt</code> → MQI-Python &nbsp;|&nbsp; <code>package.json</code> → MQI-Node",
+    options: [
+      { label: "JMS (Java / Kotlin / Scala)",       sub: "javax.jms.* or jakarta.jms.* imports",              next: "jms_agent",     badge: null },
+      { label: "XMS (.NET or legacy Java)",          sub: "IBM.XMS NuGet or com.ibm.msg.client.xms",          next: "propctl",       ctx: {api:"XMS",     effort:"medium",   effortLabel:"1–3 days"} },
+      { label: "MQI — Node.js",                     sub: "ibmmq npm package",                                 next: "propctl",       ctx: {api:"Node.js MQI", effort:"low", effortLabel:"1–2 days"} },
+      { label: "MQI — Go",                          sub: "github.com/ibm-messaging/mq-golang",                next: "go_prophandle",  badge: null },
+      { label: "MQI — Python",                      sub: "pymqi in requirements.txt",                         next: "py_prophandle",  badge: null },
+      { label: "MQI — C / C++",                     sub: "#include <cmqc.h>",                                 next: "c_format",       badge: null },
+      { label: "IBM MQ REST API",                   sub: "HTTP calls to /ibmmq/rest/v2/…",                    next: "rest_result",    badge: null },
+      { label: "AMQP 1.0",                          sub: "qpid-proton, azure-servicebus, rhea…",              next: "propctl",       ctx: {api:"AMQP 1.0", effort:"low", effortLabel:"1–2 days"} },
+      { label: "MQTT 5",                            sub: "paho-mqtt ≥ 1.6, aiomqtt ≥ 1.0, mqtt.js ≥ 4.3",  next: "propctl",       ctx: {api:"MQTT 5",  effort:"low", effortLabel:"1–2 days"} },
+      { label: "MQTT 3.1.1",                        sub: "older MQTT clients without User Properties",        next: "mqtt_blocker",   badge: "BLOCKER" },
+    ]
+  },
+
+  jms_agent: {
+    q: "Is the OTel Java Agent available on this JVM?",
+    info: "Check JVM startup flags for <code>-javaagent:opentelemetry-javaagent.jar</code>. If unavailable, ask whether adding JVM flags is feasible.",
+    options: [
+      { label: "Yes — agent is already on the JVM startup",  sub: "Or we can add the -javaagent flag",           next: "propctl", ctx: {api:"JMS + OTel Agent", effort:"zero",   effortLabel:"< 1 day"} },
+      { label: "No — JVM flags cannot be changed",           sub: "OSGi, restricted container, existing SDK…",   next: "propctl", ctx: {api:"JMS + manual SDK",  effort:"low",    effortLabel:"1–2 days"} },
+    ]
+  },
+
+  go_prophandle: {
+    q: "Does the Go ibmmq version support MQSETMP / MQINQMP (property handle API)?",
+    info: "Check the <code>mq-golang</code> changelog. Property handle API avoids manual MQRFH2 binary parsing.",
+    options: [
+      { label: "Yes — MQSETMP / MQINQMP available",   sub: "Carrier via property handles",                next: "propctl", ctx: {api:"Go MQI (prop handle)", effort:"high", effortLabel:"3–5 days"} },
+      { label: "No — property handle API missing",    sub: "Full MQRFH2 binary parse required",          next: "go_format" },
+    ]
+  },
+
+  go_format: {
+    q: "What is the MQMD.Format of messages on the queue?",
+    info: "Ask MQ admin to run <code>amqsbcg QUEUE.NAME QM1</code> and check the Format field in the message dump.",
+    options: [
+      { label: "MQFMT_RF_HEADER_2  (MQHRF2)",    sub: "MQRFH2 header present — can carry properties",     next: "propctl", ctx: {api:"Go MQI (MQRFH2 parse)", effort:"high", effortLabel:"5–8 days"} },
+      { label: "MQFMT_STRING  (MQSTR)",          sub: "No MQRFH2 — properties impossible without change", next: "format_blocker" },
+      { label: "Unknown / not checked yet",       sub: "Need to verify before proceeding",                next: "format_blocker" },
+    ]
+  },
+
+  py_prophandle: {
+    q: "Does the pymqi version in use support MQINQMP / MQSETMP?",
+    info: "Check pymqi changelog and the version in <code>requirements.txt</code>. Older versions only expose MQPUT/MQGET without property handles.",
+    options: [
+      { label: "Yes — MQINQMP / MQSETMP available",   sub: "Carrier via property handles",                next: "propctl", ctx: {api:"Python MQI (prop handle)", effort:"high", effortLabel:"3–5 days"} },
+      { label: "No — property handle API missing",    sub: "Full MQRFH2 binary parse required",          next: "py_format" },
+    ]
+  },
+
+  py_format: {
+    q: "What is the MQMD.Format of messages on the queue?",
+    info: "Ask MQ admin to run <code>amqsbcg QUEUE.NAME QM1</code> and check the Format field.",
+    options: [
+      { label: "MQFMT_RF_HEADER_2  (MQHRF2)",    sub: "MQRFH2 header present — can carry properties",     next: "propctl", ctx: {api:"Python MQI (MQRFH2 parse)", effort:"high", effortLabel:"5–8 days"} },
+      { label: "MQFMT_STRING  (MQSTR)",          sub: "No MQRFH2 — properties impossible without change", next: "format_blocker" },
+      { label: "Unknown / not checked yet",       sub: "Need to verify before proceeding",                next: "format_blocker" },
+    ]
+  },
+
+  c_format: {
+    q: "What is the MQMD.Format of messages on the queue?",
+    info: "Ask MQ admin to run <code>amqsbcg QUEUE.NAME QM1</code>. C/C++ services always require manual MQRFH2 struct manipulation regardless of format.",
+    options: [
+      { label: "MQFMT_RF_HEADER_2  (MQHRF2)",    sub: "MQRFH2 header present — struct manipulation required",  next: "propctl", ctx: {api:"C/C++ MQI (MQRFH2 struct)", effort:"high", effortLabel:"5–8 days"} },
+      { label: "MQFMT_STRING  (MQSTR)",          sub: "No MQRFH2 — format change required (breaking)",         next: "format_blocker" },
+      { label: "Unknown / not checked yet",       sub: "Need to verify before proceeding",                      next: "format_blocker" },
+    ]
+  },
+
+  propctl: {
+    q: "Is PROPCTL(ALL) set on every queue and channel in the message path?",
+    info: "Ask MQ admin: <code>DISPLAY QLOCAL(*) PROPCTL</code> and <code>DISPLAY CHANNEL(*) PROPCTL</code>. Every hop must be PROPCTL(ALL) — one wrong setting breaks the chain.",
+    options: [
+      { label: "Yes — all queues and channels have PROPCTL(ALL)",    sub: "Properties flow end-to-end",           next: "pattern" },
+      { label: "No — at least one queue/channel has PROPCTL(FORCE)", sub: "All properties stripped at that point", next: "propctl_blocker" },
+      { label: "Unknown — not yet verified",                          sub: "Must check before implementation",     next: "propctl_blocker" },
+    ]
+  },
+
+  pattern: {
+    q: "What messaging pattern does this service use?",
+    info: "This determines how many extract/inject points are needed and what special handling applies.",
+    options: [
+      { label: "Point-to-Point Queue",      sub: "One producer → one consumer",                              next: "result_p2p" },
+      { label: "Pub/Sub Topic",             sub: "One publisher → multiple subscribers",                    next: "result_pubsub" },
+      { label: "Pipeline (sequential queues)", sub: "Producer → Q1 → Stage A → Q2 → Stage B → Consumer",   next: "result_pipeline" },
+      { label: "Competing Consumers",       sub: "Multiple consumer instances on the same queue",            next: "result_competing" },
+      { label: "Request-Reply",             sub: "Producer puts request, waits on a reply-to queue",        next: "result_reqreply" },
+      { label: "Dead Letter Queue handler", sub: "Service that reads from DLQ and retries or discards",     next: "result_dlq" },
+      { label: "Queue Manager Cluster / Federation", sub: "Messages cross Queue Manager boundaries",        next: "result_cluster" },
+      { label: "MQ Bridge (→ Kafka, HTTP, AMQP…)", sub: "Messages leave IBM MQ to another broker/system",  next: "result_bridge" },
+    ]
+  },
+
+  // ── Results ───────────────────────────────────────────────────────────────
+
+  rest_result: {
+    type: "result",
+    status: "caution",
+    title: "REST API — limited propagation, context lost on re-queue",
+    effort: "1 day",
+    effortClass: "badge-low",
+    steps: [
+      "Context propagation works at the HTTP layer only: inject <code>traceparent</code> and <code>baggage</code> as HTTP headers on the REST call to IBM MQ.",
+      "HTTP auto-instrumentation handles this if already wired in (OTel Java agent, OTel Python SDK, etc.).",
+      "On the consumer side, use the REST GET endpoint — context arrives via the HTTP response headers, NOT embedded in the message body.",
+    ],
+    blockers: [
+      "If the message is forwarded to another queue internally (pipeline, DLQ), context is lost. The REST API does not embed context in the MQRFH2.",
+      "Not suitable for any pattern beyond a single produce/consume hop.",
+    ],
+    gotchas: [
+      "REST API carries no CSRF token by default — add <code>ibm-mq-rest-csrf-token</code> header.",
+      "No transaction support via REST: no rollback on consumer failure.",
+    ]
+  },
+
+  mqtt_blocker: {
+    type: "result",
+    status: "blocker",
+    title: "MQTT 3.1.1 — no header mechanism, propagation impossible without payload change",
+    effort: "BLOCKER",
+    effortClass: "badge-blocker",
+    steps: [],
+    blockers: [
+      "MQTT 3.1.1 has no User Properties concept. The only way to carry <code>traceparent</code> / <code>baggage</code> is to embed them inside the message payload — a breaking schema change that all consumers must agree to.",
+      "IBM MQ requires MQ 9.2+ to map MQTT 5 User Properties to MQRFH2. Confirm the MQ version before committing to an upgrade.",
+    ],
+    gotchas: [
+      "Escalation path: upgrade clients to MQTT 5, or insert a gateway service that wraps MQTT 3.1.1 messages and adds context before handing to MQ.",
+    ]
+  },
+
+  propctl_blocker: {
+    type: "result",
+    status: "blocker",
+    title: "PROPCTL is not ALL — message properties will be stripped",
+    effort: "BLOCKER",
+    effortClass: "badge-blocker",
+    steps: [
+      "Raise a change request with the MQ admin team: set <code>PROPCTL(ALL)</code> on every local queue and channel in the message path.",
+      "Command: <code>ALTER QLOCAL(QUEUE.NAME) PROPCTL(ALL)</code> and <code>ALTER CHANNEL(CHANNEL.NAME) PROPCTL(ALL)</code>.",
+      "For remote queue definitions and cluster queues: apply <code>PROPCTL(ALL)</code> on the remote queue definition too.",
+      "Re-run verification after the change: <code>DISPLAY QLOCAL(*) PROPCTL</code>.",
+    ],
+    blockers: [
+      "Until PROPCTL(ALL) is set, no MQRFH2 properties (including traceparent and baggage) will survive the hop. No workaround at the application layer.",
+      "If PROPCTL cannot be changed (change freeze, audit lock), the only fallback is a mediator service that embeds context in the message body — a breaking change requiring all consumers to update.",
+    ],
+    gotchas: [
+      "PROPCTL(COMPAT) may work if messages already carry MQRFH2, but is unreliable — prefer PROPCTL(ALL).",
+    ]
+  },
+
+  format_blocker: {
+    type: "result",
+    status: "blocker",
+    title: "MQFMT_STRING — no MQRFH2, properties impossible without a breaking format change",
+    effort: "BLOCKER",
+    effortClass: "badge-blocker",
+    steps: [
+      "Coordinate with the producer team to change <code>MQMD.Format</code> from <code>MQFMT_STRING</code> to <code>MQFMT_RF_HEADER_2</code>.",
+      "All consumers must be updated to handle the new format before the producer change is deployed.",
+      "Run in dual-format mode during migration: consumer reads Format field first; if <code>MQSTR</code>, old path; if <code>MQHRF2</code>, new path.",
+    ],
+    blockers: [
+      "Format change is a breaking wire-protocol change. All consumers in the pipeline must be updated before the producer switches.",
+      "If any consumer is a third party or cannot be changed, propagation is not achievable end-to-end for that leg.",
+    ],
+    gotchas: [
+      "Verify with <code>amqsbcg QUEUE QM1</code> that Format shows <code>MQHRF2</code> after the producer change.",
+    ]
+  },
+
+  result_p2p: {
+    type: "result",
+    status: "achievable",
+    title: "Point-to-Point — straightforward, single extract / inject",
+    steps: [
+      "Producer: start span with <code>PRODUCER</code> kind, inject context into the outbound message.",
+      "Consumer: extract context from the incoming message, start child span with <code>CONSUMER</code> kind, end span after <code>acknowledge()</code> or session commit.",
+      "Verify a single trace in Tempo with both spans linked under the same trace-id.",
+    ],
+    gotchas: [
+      "End the consumer span AFTER <code>message.acknowledge()</code>, not before — otherwise errors during ack are outside the span.",
+      "Set <code>messaging.system=ibmmq</code> and <code>messaging.destination.name</code> as span attributes.",
+    ]
+  },
+
+  result_pubsub: {
+    type: "result",
+    status: "achievable",
+    title: "Pub/Sub — each subscriber extracts independently, fan-out creates child branches",
+    steps: [
+      "Publisher: start span, inject context into the published message (same as point-to-point produce).",
+      "Each subscriber: independently extracts context from its own message copy, starts a child span.",
+      "If a subscriber also publishes downstream: inject into each outbound message. Each gets the same <code>baggage</code> but a new <code>traceparent</code> (child span-id, same trace-id).",
+      "Use durable subscriptions if subscribers must receive messages while offline — verify <code>PROPCTL(ALL)</code> on the managed queue IBM MQ creates per subscription.",
+    ],
+    gotchas: [
+      "Non-durable subscriptions lose messages (and context) if the subscriber is down — not a propagation bug, a delivery gap.",
+      "Fan-out: N subscribers → N child spans all under the same parent. This is correct — each represents an independent processing path.",
+    ]
+  },
+
+  result_pipeline: {
+    type: "result",
+    status: "achievable",
+    title: "Pipeline — every intermediate stage must extract AND inject",
+    steps: [
+      "Map every stage: <em>queue name → service → next queue → service</em>. Every service is both a consumer (extract) and a producer (inject).",
+      "Each stage: extract on consume → start child span → do work → inject into outbound message → commit → end span.",
+      "Verify PROPCTL(ALL) on every queue in the chain, not just the first and last.",
+      "Trace in Tempo should show a waterfall: stage-1 → stage-2 → stage-3 as nested child spans.",
+    ],
+    blockers: [
+      "If any intermediate stage rebuilds the message from scratch without copying MQRFH2 properties, the trace chain breaks at that point. Each stage must copy or re-inject context.",
+    ],
+    gotchas: [
+      "A stage that converts <code>MQMD.Format</code> to <code>MQFMT_STRING</code> silently drops all properties. All stages must preserve <code>MQFMT_RF_HEADER_2</code>.",
+      "A stage that crashes mid-pipeline and rolls back will requeue the message. The redelivered message still carries the original <code>traceparent</code> — the retry appears as a sibling span, not a duplicate. This is correct behaviour.",
+    ]
+  },
+
+  result_competing: {
+    type: "result",
+    status: "achievable",
+    title: "Competing Consumers — each instance extracts independently, no coordination needed",
+    steps: [
+      "Each consumer instance independently extracts context from its own message. No coordination required between instances.",
+      "All instances must share the same <code>OTEL_SERVICE_NAME</code> so they appear as one logical service in the service graph.",
+      "Extract → child span → process → acknowledge → end span (same as point-to-point).",
+    ],
+    gotchas: [
+      "If a consumer instance re-puts the message to the same queue on failure WITHOUT carrying the original <code>traceparent</code>, a new orphan trace is created. Always carry context through re-puts.",
+      "Backout handling: when <code>BackoutCount</code> exceeds the threshold, IBM MQ moves the message to DLQ automatically — apply the DLQ handler pattern (separate flow) for that leg.",
+    ]
+  },
+
+  result_reqreply: {
+    type: "result",
+    status: "achievable",
+    title: "Request-Reply — two propagation hops, correlation is not a substitute for traceparent",
+    steps: [
+      "Requester: inject context into the request message. Set <code>JMSReplyTo</code> (or <code>MQMD.ReplyToQ</code>) to the reply queue. Start a span that stays open while waiting.",
+      "Responder: extract context from the request message, start a child span, do work, inject context into the reply message, send reply, end span.",
+      "Requester: extract context from the reply message to continue the trace. <code>JMSCorrelationID</code> alone is NOT trace context — do not use it as a substitute.",
+      "If using a temporary reply queue (<code>session.createTemporaryQueue()</code>): verify <code>PROPCTL(ALL)</code> on the model queue used to create it.",
+    ],
+    gotchas: [
+      "<code>JMSCorrelationID</code> / <code>MQMD.CorrelId</code> ties request to reply at the application level. <code>traceparent</code> ties them at the tracing level. Both are needed; they serve different purposes.",
+      "If the requester times out before the reply arrives, the reply goes to the DLQ (or is silently dropped if the temporary queue was deleted). The responder's span will appear as an orphan.",
+    ]
+  },
+
+  result_dlq: {
+    type: "result",
+    status: "achievable",
+    title: "DLQ Handler — extract from original MQRFH2 after the MQDLH header",
+    steps: [
+      "IBM MQ prepends an <code>MQDLH</code> (Dead Letter Header, 172 bytes) before the original message on the DLQ. The original <code>MQMD</code> and <code>MQRFH2</code> follow after it.",
+      "DLQ handler must strip the <code>MQDLH</code>, then extract <code>traceparent</code> / <code>baggage</code> from the original <code>MQRFH2</code>.",
+      "Start a child span tagged <code>error=true</code>. Add <code>MQDLH.Reason</code> as a span attribute to record why the message was dead-lettered.",
+      "On retry (re-put to original queue): inject <em>fresh</em> context so the retry appears as a new child span, not a replay of the failed span.",
+      "On discard: end the span, log the reason — no re-injection needed.",
+    ],
+    gotchas: [
+      "Do not try to extract context from the <code>MQDLH</code> fixed header — it has no user-defined properties. Context is in the original <code>MQRFH2</code> that follows.",
+      "Monitor DLQ depth independently. A full DLQ causes IBM MQ to reject puts on the source queue (<code>MQRC_Q_FULL</code>).",
+    ]
+  },
+
+  result_cluster: {
+    type: "result",
+    status: "achievable",
+    title: "QM Cluster / Federation — PROPCTL must match on remote queue definitions too",
+    steps: [
+      "Application-level implementation is the same as point-to-point: extract on consume, inject on produce.",
+      "Ask MQ admin to verify <code>PROPCTL(ALL)</code> on the remote queue definition on the receiving QM, not just the local queue on the sending QM.",
+      "Command: <code>DISPLAY QREMOTE(QUEUE.NAME) PROPCTL</code> on each QM in the cluster.",
+      "For cluster queues: <code>DISPLAY QCLUSTER(QUEUE.NAME) PROPCTL</code>.",
+    ],
+    gotchas: [
+      "A mismatch between local and remote <code>PROPCTL</code> settings silently strips properties at the inter-QM boundary. The trace chain breaks there with no application-level error.",
+      "Channels carrying messages between QMs also have a <code>PROPCTL</code> setting — verify <code>DISPLAY CHANNEL(CLUSSDR.*) PROPCTL</code> as well.",
+    ]
+  },
+
+  result_bridge: {
+    type: "result",
+    status: "caution",
+    title: "MQ Bridge — depends entirely on whether the bridge maps MQRFH2 properties",
+    steps: [
+      "Identify which bridge is in use and check its property mapping capability (table below).",
+      "If the bridge maps automatically: verify PROPCTL(ALL) on the MQ side, configure the mapping, and test end-to-end.",
+      "If the bridge does NOT map automatically: insert a mediator service between MQ and the bridge. The mediator consumes from MQ (extracting context), then produces to the target system injecting context in the target format.",
+    ],
+    blockers: [
+      "<strong>MQ → Kafka (Kafka Connect)</strong>: set <code>MQ.MESSAGE.BODY.JMS=true</code> in the connector config. MQRFH2 <code>&lt;usr&gt;</code> entries map to Kafka record headers automatically.",
+      "<strong>MQ → RabbitMQ</strong>: no automatic property mapping. Mediator service required.",
+      "<strong>MQ → HTTP (MQ Bridge for HTTP)</strong>: configure explicit field mappings for <code>traceparent</code> and <code>baggage</code> in the bridge config.",
+      "<strong>MQ → AMQP channel</strong>: <code>application-properties</code> map to MQRFH2 automatically when PROPCTL(ALL) is set.",
+    ],
+    gotchas: [
+      "Treat any bridge that cannot map properties as a trace break point — a new root span starts on the other side of the bridge.",
+      "Use <code>baggage.link</code> or a custom span link to preserve the correlation even when full propagation is not possible.",
+    ]
+  },
+
+};
+
+// ─── Engine ────────────────────────────────────────────────────────────────
+
+let history = []; // [{stateKey, choiceLabel, ctx}]
+let ctx = {};
+
+function getState(key) { return STATES[key]; }
+
+function render(stateKey) {
+  const state = getState(stateKey);
+  if (!state) return;
+  renderBreadcrumb(stateKey);
+  const card = document.getElementById('card');
+  card.innerHTML = '';
+  if (state.type === 'result') {
+    card.appendChild(buildResult(state));
+  } else {
+    card.appendChild(buildQuestion(state, stateKey));
+  }
+}
+
+function buildQuestion(state, stateKey) {
+  const wrap = document.createElement('div');
+
+  const qblock = document.createElement('div');
+  qblock.className = 'question-block';
+  qblock.innerHTML = `
+    <div class="question-label">Decision point</div>
+    <div class="question-text">${state.q}</div>
+    ${state.info ? `<div class="question-info">${state.info}</div>` : ''}
+  `;
+  wrap.appendChild(qblock);
+
+  const opts = document.createElement('div');
+  opts.className = 'options';
+
+  state.options.forEach(opt => {
+    const btn = document.createElement('button');
+    btn.className = 'option';
+    const badgeClass = opt.badge === 'BLOCKER' ? 'badge-blocker' : null;
+    btn.innerHTML = `
+      <div class="option-icon"></div>
+      <div class="option-content">
+        <div class="option-label">${opt.label}</div>
+        ${opt.sub ? `<div class="option-sublabel">${opt.sub}</div>` : ''}
+      </div>
+      ${badgeClass ? `<span class="option-badge ${badgeClass}">${opt.badge}</span>` : ''}
+    `;
+    btn.addEventListener('click', () => {
+      if (opt.ctx) Object.assign(ctx, opt.ctx);
+      history.push({ stateKey, choiceLabel: opt.label, ctx: {...ctx} });
+      render(opt.next);
+    });
+    opts.appendChild(btn);
+  });
+
+  wrap.appendChild(opts);
+  return wrap;
+}
+
+function buildResult(state) {
+  const effort = ctx.effortLabel || state.effort || '';
+  const effortClass = ctx.effort
+    ? { zero:'badge-zero', low:'badge-low', medium:'badge-medium', high:'badge-high', blocker:'badge-blocker' }[ctx.effort] || 'badge-low'
+    : (state.effortClass || 'badge-low');
+
+  const statusClass = { achievable:'achievable', caution:'caution', blocker:'blocker' }[state.status];
+
+  let html = `
+    <div class="result-block">
+      <div class="result-header ${statusClass}">
+        <div class="result-title">${state.title}</div>
+        ${effort ? `<span class="result-effort ${effortClass}">${effort}</span>` : ''}
+      </div>
+      <div class="result-body">
+  `;
+
+  // API context badge
+  if (ctx.api) {
+    html += `
+      <div>
+        <div class="section-heading">API / approach</div>
+        <div class="info-item">
+          <span class="info-icon">◈</span>
+          <span><strong>${ctx.api}</strong> — ${ctx.effortLabel || effort}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  if (state.steps && state.steps.length) {
+    html += `<div><div class="section-heading">Implementation steps</div><div class="step-list">`;
+    state.steps.forEach((s, i) => {
+      html += `<div class="step"><div class="step-num">${i+1}</div><div class="step-text">${s}</div></div>`;
+    });
+    html += `</div></div>`;
+  }
+
+  if (state.blockers && state.blockers.length) {
+    const heading = state.status === 'blocker' ? 'Why this is blocked' : 'Blockers / cannot be achieved';
+    html += `<div><div class="section-heading">${heading}</div><div class="blocker-list">`;
+    state.blockers.forEach(b => {
+      html += `<div class="blocker-item"><span class="blocker-icon">✕</span><span>${b}</span></div>`;
+    });
+    html += `</div></div>`;
+  }
+
+  if (state.gotchas && state.gotchas.length) {
+    html += `<div><div class="section-heading">Gotchas</div><div class="gotcha-list">`;
+    state.gotchas.forEach(g => {
+      html += `<div class="gotcha"><span class="gotcha-icon">⚠</span><span>${g}</span></div>`;
+    });
+    html += `</div></div>`;
+  }
+
+  html += `</div>
+    <div class="result-actions">
+      <button class="btn btn-primary" id="btn-restart">Start over</button>
+      ${history.length > 1 ? `<button class="btn" id="btn-back">← Back</button>` : ''}
+    </div>
+  </div>`;
+
+  const el = document.createElement('div');
+  el.innerHTML = html;
+
+  el.querySelector('#btn-restart').addEventListener('click', () => {
+    history = []; ctx = {}; render('start');
+  });
+  const btnBack = el.querySelector('#btn-back');
+  if (btnBack) btnBack.addEventListener('click', goBack);
+
+  return el;
+}
+
+function renderBreadcrumb(currentKey) {
+  const bc = document.getElementById('breadcrumb');
+  bc.innerHTML = '';
+
+  history.forEach((step, i) => {
+    const crumb = document.createElement('span');
+    crumb.className = 'crumb';
+    crumb.textContent = step.choiceLabel.length > 38 ? step.choiceLabel.slice(0, 36) + '…' : step.choiceLabel;
+    crumb.title = step.choiceLabel;
+    crumb.addEventListener('click', () => goToHistory(i));
+    bc.appendChild(crumb);
+
+    const sep = document.createElement('span');
+    sep.className = 'crumb-sep';
+    sep.textContent = ' › ';
+    bc.appendChild(sep);
+  });
+
+  if (history.length > 0) {
+    const cur = document.createElement('span');
+    cur.className = 'crumb active';
+    cur.textContent = 'result';
+    bc.appendChild(cur);
+  }
+}
+
+function goBack() {
+  if (history.length === 0) return;
+  const prev = history.pop();
+  // restore ctx to state before this choice
+  ctx = prev.ctx || {};
+  // re-render the state we just left (the question state)
+  render(prev.stateKey);
+}
+
+function goToHistory(idx) {
+  history = history.slice(0, idx);
+  const target = idx === 0 ? 'start' : STATES[history[idx-1]?.stateKey]?.options?.find(o => true)?.next;
+  ctx = history.length ? history[history.length-1].ctx : {};
+  render(history.length ? history[history.length-1].stateKey : 'start');
+  // simpler: just go back to the question at that history entry
+  if (history.length > 0) {
+    const stateKey = history[history.length-1].stateKey;
+    history.pop();
+    ctx = history.length ? history[history.length-1].ctx : {};
+    render(stateKey);
+  } else {
+    history = []; ctx = {};
+    render('start');
+  }
+}
+
+// ─── Init ──────────────────────────────────────────────────────────────────
+render('start');
+</script>
+</body>
+</html>
