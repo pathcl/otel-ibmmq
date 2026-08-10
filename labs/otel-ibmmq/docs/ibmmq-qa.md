@@ -198,6 +198,55 @@ monitoring, and troubleshooting. Also available as PDF bundles for offline readi
 
 ---
 
+## What are IBM MQ exits and how do they relate to context propagation? `#ibmmq` `#o11y`
+
+IBM MQ exits are user-written routines that IBM MQ calls automatically at
+specific points in message processing. They run inside the application's process
+without the application knowing.
+
+### Relevant exit types
+
+| Exit type | When it fires | Typical use |
+|-----------|--------------|-------------|
+| **API exit** | Before/after every `MQPUT`, `MQGET`, `MQOPEN`, etc. | Add/read MQRFH2 properties transparently |
+| **Channel exit** | During message transmission between queue managers | Encrypt, filter, or stamp messages at network boundary |
+| **Message exit** | When a message is about to cross a channel | Re-stamp or validate headers between QMs |
+
+### Why this matters for producers that cannot inject context
+
+An **API exit on MQPUT** can inspect every outgoing message and inject
+`traceparent` + `baggage` into MQRFH2 if they are not already present.
+The producer application code never changes. This solves the fire-and-forget
+problem when the producer is a legacy app, a C/COBOL native-MQ application,
+or a vendor system you do not own.
+
+Instana and Dynatrace both ship an IBM MQ API exit that does exactly this —
+every `MQPUT` is intercepted, context is injected if absent, and the consumer
+side's `extract()` works normally.
+
+### OTel Java agent — the JVM equivalent
+
+For Java producers specifically, the **OpenTelemetry Java agent** achieves the
+same result without an MQ exit. It instruments JMS calls via bytecode
+injection at the JVM level:
+
+- intercepts `MessageProducer.send()` and injects `traceparent`/`baggage` automatically
+- intercepts `MessageConsumer.receive()` and extracts them automatically
+- requires zero code changes to the application
+
+The difference from an MQ exit: the Java agent works only for JVM processes.
+An MQ API exit works for any producer language (C, COBOL, RPG, Java, .NET).
+
+### What the lab uses
+
+The lab does manual `inject()`/`extract()` in application code — REQ 6, 7, 8
+in the hard requirements. This is equivalent to what the OTel Java agent does
+automatically, but written out explicitly so the mechanism is visible.
+Using the agent or an MQ exit would make REQ 6-8 automatic and remove the
+risk of a developer forgetting to call them.
+
+---
+
 ## What does the TraceQL syntax look like for querying by tenant? `#o11y`
 
 ```
