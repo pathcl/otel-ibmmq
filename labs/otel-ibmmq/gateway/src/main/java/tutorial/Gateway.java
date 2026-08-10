@@ -16,6 +16,8 @@ import io.opentelemetry.context.propagation.TextMapGetter;
 import javax.jms.*;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.logging.Logger;
 
 public class Gateway {
@@ -34,14 +36,20 @@ public class Gateway {
         this.queueName = queueName;
     }
 
+    // Derives the W3C Baggage key from an HTTP header name.
+    // Strips the leading "x-" or "X-" prefix, lowercases everything, and
+    // replaces "-" with "." so that X-Tenant-ID becomes tenant.id.
+    private static String headerToBaggageKey(String header) {
+        return header.substring(2).toLowerCase().replace('-', '.');
+    }
+
     void handle(HttpExchange exchange) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             exchange.sendResponseHeaders(405, -1);
             return;
         }
 
-        // Extract incoming trace context first — upstream baggage may already carry
-        // tenant.id, in which case X-Tenant-ID is optional (middle-of-chain mode).
+        // Extract incoming trace context (traceparent + W3C baggage from upstream).
         Context parentCtx = otel.getPropagators().getTextMapPropagator()
             .extract(Context.current(), exchange, new TextMapGetter<HttpExchange>() {
                 @Override
@@ -54,40 +62,32 @@ public class Gateway {
                 }
             });
 
-        // Prefer baggage values propagated by an upstream service; fall back to
-        // explicit headers when the gateway is itself the entry point of the chain.
-        Baggage upstreamBaggage = Baggage.fromContext(parentCtx);
-        String tenantId = upstreamBaggage.getEntryValue("tenant.id");
-        String userId   = upstreamBaggage.getEntryValue("user.id");
+        // Collect context values: upstream baggage first (takes precedence),
+        // then any X-* request headers that are not already present.
+        // Java HttpServer lowercases header names, so we match on "x-".
+        Map<String, String> values = new LinkedHashMap<>();
+        Baggage.fromContext(parentCtx).asMap()
+            .forEach((k, e) -> values.put(k, e.getValue()));
+        exchange.getRequestHeaders().forEach((name, vals) -> {
+            if (name.toLowerCase().startsWith("x-") && !vals.isEmpty()) {
+                values.putIfAbsent(headerToBaggageKey(name), vals.get(0));
+            }
+        });
 
-        if (tenantId == null || tenantId.isBlank()) {
-            tenantId = exchange.getRequestHeaders().getFirst("X-Tenant-ID");
-        }
-        if (userId == null || userId.isBlank()) {
-            String h = exchange.getRequestHeaders().getFirst("X-User-ID");
-            userId = h != null ? h : "anonymous";
-        }
-
-        if (tenantId == null || tenantId.isBlank()) {
+        // tenant.id is required — it drives validation and routing downstream.
+        if (!values.containsKey("tenant.id") || values.get("tenant.id").isBlank()) {
             byte[] msg = "X-Tenant-ID header or upstream baggage required\n".getBytes();
             exchange.sendResponseHeaders(400, msg.length);
             exchange.getResponseBody().write(msg);
             return;
         }
 
-        // In middle-of-chain mode the upstream baggage is already in parentCtx —
-        // forwarding it unchanged preserves the original values set by the true entry
-        // point. In beginning-of-chain mode we create fresh baggage from the headers.
-        Context ctx;
-        if (upstreamBaggage.getEntryValue("tenant.id") != null) {
-            ctx = parentCtx;
-        } else {
-            ctx = Baggage.builder()
-                .put("tenant.id", tenantId)
-                .put("user.id", userId)
-                .build()
-                .storeInContext(parentCtx);
-        }
+        // Build a fresh baggage from the merged values and attach to parent context.
+        // In middle-of-chain mode the upstream entries dominate (putIfAbsent above);
+        // in origin mode the X-* headers seed everything.
+        var bb = Baggage.builder();
+        values.forEach(bb::put);
+        Context ctx = bb.build().storeInContext(parentCtx);
 
         Span span = tracer.spanBuilder("gateway.send")
             .setSpanKind(SpanKind.PRODUCER)
@@ -95,16 +95,15 @@ public class Gateway {
             .startSpan();
 
         try (Scope scope = ctx.with(span).makeCurrent()) {
-            span.setAttribute("tenant.id", tenantId);
             span.setAttribute("messaging.system", "ibmmq");
             span.setAttribute("messaging.destination.name", queueName);
+            values.forEach((k, v) -> span.setAttribute(k, v));
 
             Session session = jmsConnection.createSession(false, Session.AUTO_ACKNOWLEDGE);
             Queue queue    = session.createQueue(queueName);
+            String tenantId = values.get("tenant.id");
             TextMessage message = session.createTextMessage("order from tenant=" + tenantId);
 
-            // Inject traceparent, tracestate, and baggage into JMS message properties.
-            // JmsCarrier.SETTER handles the JMS property name constraints.
             otel.getPropagators().getTextMapPropagator()
                 .inject(Context.current(), message, JmsCarrier.SETTER);
 
@@ -114,7 +113,7 @@ public class Gateway {
             byte[] body = ("sent | tenant=" + tenantId + "\n").getBytes();
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
-            log.info("Message sent | tenant=" + tenantId + " user=" + userId);
+            log.info("Message sent | " + values);
         } catch (JMSException e) {
             span.recordException(e);
             log.severe("JMS error: " + e.getMessage());

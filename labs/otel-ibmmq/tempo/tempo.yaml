@@ -22,9 +22,11 @@ metrics_generator:
     service_graphs:
       dimensions:
         - tenant.id
+        - user.id
     span_metrics:
       dimensions:
         - tenant.id
+        - user.id
 
 storage:
   trace:

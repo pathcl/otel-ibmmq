@@ -48,18 +48,15 @@ public class Processor {
             .startSpan();
 
         try (Scope scope = extractedCtx.with(span).makeCurrent()) {
-            // Read baggage from the extracted context — this is the tenant.id and user.id
-            // that the gateway set before sending the JMS message.
-            Baggage baggage  = Baggage.fromContext(extractedCtx);
-            String tenantId  = baggage.getEntryValue("tenant.id");
-            String userId    = baggage.getEntryValue("user.id");
+            Baggage baggage = Baggage.fromContext(extractedCtx);
 
-            // Copy baggage values to span attributes so they are indexed and searchable
-            // in Tempo. Baggage alone travels in context; it does NOT appear in spans
-            // unless explicitly copied here.
-            if (tenantId != null) span.setAttribute("tenant.id", tenantId);
-            if (userId   != null) span.setAttribute("user.id",   userId);
             span.setAttribute("messaging.system", "ibmmq");
+            // Set all baggage entries as span attributes — no hardcoded key names.
+            baggage.asMap().forEach((key, entry) -> span.setAttribute(key, entry.getValue()));
+
+            // tenant.id drives the metric dimension (business logic).
+            String tenantId = baggage.getEntryValue("tenant.id");
+            String userId   = baggage.getEntryValue("user.id");
 
             // Record metric with tenant dimension — this is what powers the Grafana dashboard.
             messagesProcessed.add(1, Attributes.builder()

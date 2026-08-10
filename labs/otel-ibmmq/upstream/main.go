@@ -33,7 +33,6 @@ var (
 // W3C TraceContext + W3C Baggage. Both must be present for downstream services
 // to receive both traceparent and baggage headers.
 func initOtel(ctx context.Context, serviceName, collectorEndpoint string) (func(), error) {
-	// gRPC dial expects "host:port", not "http://host:port"
 	endpoint := strings.TrimPrefix(collectorEndpoint, "http://")
 	endpoint = strings.TrimPrefix(endpoint, "https://")
 
@@ -70,27 +69,47 @@ func initOtel(ctx context.Context, serviceName, collectorEndpoint string) (func(
 	}, nil
 }
 
-// handleOrder is the entry point of the distributed trace. It:
-//  1. Creates a root span (no upstream context — this service owns the trace origin)
-//  2. Sets tenant.id and user.id as W3C Baggage
-//  3. Injects traceparent + baggage into the outbound HTTP request to the gateway
+// headerToBaggageKey derives the W3C Baggage key from an HTTP header name.
+// Go's net/http canonicalises header names (X-Tenant-ID → X-Tenant-Id), so
+// we strip "X-", lowercase, and replace "-" with ".":
 //
-// The gateway and all MQ services downstream will receive this context and
-// create child spans under the same trace ID.
+//	X-Tenant-Id → tenant.id
+//	X-User-Id   → user.id
+//	X-Region-Id → region.id
+func headerToBaggageKey(header string) string {
+	return strings.ToLower(strings.ReplaceAll(header[2:], "-", "."))
+}
+
+// handleOrder is the entry point of the distributed trace. It collects every
+// X-* header from the incoming request, forwards them all as W3C Baggage to
+// the gateway, and injects traceparent + baggage into the outbound HTTP call.
+//
+// Adding a new propagated attribute requires no code change — just send the
+// corresponding X-* header and it flows through the entire pipeline.
 func handleOrder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	tenantID := r.Header.Get("X-Tenant-ID")
-	userID := r.Header.Get("X-User-ID")
+	// Collect all X-* headers. Go's HTTP server canonicalises header names, so
+	// X-Tenant-ID arrives as X-Tenant-Id and derives to tenant.id.
+	attrs := map[string]string{}
+	for name, vals := range r.Header {
+		if strings.HasPrefix(name, "X-") && len(vals) > 0 {
+			attrs[headerToBaggageKey(name)] = vals[0]
+		}
+	}
+
+	tenantID := attrs["tenant.id"]
 	if tenantID == "" {
 		http.Error(w, "X-Tenant-ID required", http.StatusBadRequest)
 		return
 	}
+	userID := attrs["user.id"]
 	if userID == "" {
 		userID = "anonymous"
+		attrs["user.id"] = userID
 	}
 
 	tracer := otel.Tracer("tutorial.upstream")
@@ -98,30 +117,40 @@ func handleOrder(w http.ResponseWriter, r *http.Request) {
 		trace.WithSpanKind(trace.SpanKindClient))
 	defer span.End()
 
-	span.SetAttributes(
-		attribute.String("tenant.id", tenantID),
-		attribute.String("user.id", userID),
-	)
+	// Set all collected values as span attributes.
+	for k, v := range attrs {
+		span.SetAttributes(attribute.String(k, v))
+	}
 
-	// Baggage carries business context across process boundaries.
-	// Every downstream service reads tenant.id from baggage rather than
-	// parsing the message body or relying on custom headers.
-	tenantMember, _ := baggage.NewMember("tenant.id", tenantID)
-	userMember, _ := baggage.NewMember("user.id", userID)
-	bag, _ := baggage.New(tenantMember, userMember)
+	// Build W3C Baggage from all collected X-* headers.
+	var members []baggage.Member
+	for k, v := range attrs {
+		m, err := baggage.NewMember(k, v)
+		if err != nil {
+			log.Printf("skipping baggage key %q: %v", k, err)
+			continue
+		}
+		members = append(members, m)
+	}
+	bag, _ := baggage.New(members...)
 	ctx = baggage.ContextWithBaggage(ctx, bag)
 
-	// Build the outbound request to the gateway.
-	// X-Tenant-ID / X-User-ID are kept so the gateway can validate them
-	// independently of baggage (useful when gateway is also an entry point).
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, gatewayURL, strings.NewReader(""))
 	if err != nil {
 		span.RecordError(err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	req.Header.Set("X-Tenant-ID", tenantID)
-	req.Header.Set("X-User-ID", userID)
+
+	// Forward all X-* headers to the gateway so it can validate them
+	// independently (useful when gateway is also used as a standalone entry point).
+	for name, vals := range r.Header {
+		if strings.HasPrefix(name, "X-") {
+			for _, v := range vals {
+				req.Header.Add(name, v)
+			}
+		}
+	}
 
 	// Inject writes traceparent, tracestate, and baggage into req.Header.
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))

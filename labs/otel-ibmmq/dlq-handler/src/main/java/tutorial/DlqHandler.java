@@ -48,13 +48,16 @@ public class DlqHandler {
             .startSpan();
 
         try (Scope ignored = extractedCtx.with(span).makeCurrent()) {
-            Baggage baggage  = Baggage.fromContext(extractedCtx);
-            String tenantId  = baggage.getEntryValue("tenant.id");
-            String reason    = message.getStringProperty("dlq_reason");
+            Baggage baggage = Baggage.fromContext(extractedCtx);
+            String reason   = message.getStringProperty("dlq_reason");
 
             span.setAttribute("messaging.system", "ibmmq");
             span.setAttribute("dlq.reason", reason != null ? reason : "unknown");
-            if (tenantId != null) span.setAttribute("tenant.id", tenantId);
+            // Set all baggage entries as span attributes — no hardcoded key names.
+            baggage.asMap().forEach((key, entry) -> span.setAttribute(key, entry.getValue()));
+
+            // tenant.id drives the metric dimension (business logic).
+            String tenantId = baggage.getEntryValue("tenant.id");
 
             // Mark span as error — this lights up the arc__error arc on the node in
             // the Grafana node graph panel.

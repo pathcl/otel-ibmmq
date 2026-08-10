@@ -48,27 +48,29 @@ public class Enricher {
             .startSpan();
 
         try (Scope ignored = extractedCtx.with(consumerSpan).makeCurrent()) {
-            Baggage baggage  = Baggage.fromContext(extractedCtx);
-            String tenantId  = baggage.getEntryValue("tenant.id");
-            String userId    = baggage.getEntryValue("user.id");
-            String region    = TENANT_REGIONS.getOrDefault(tenantId, "unknown");
-            String processingId = UUID.randomUUID().toString().substring(0, 8);
+            Baggage baggage = Baggage.fromContext(extractedCtx);
 
             consumerSpan.setAttribute("messaging.system", "ibmmq");
-            if (tenantId != null) consumerSpan.setAttribute("tenant.id", tenantId);
-            if (userId   != null) consumerSpan.setAttribute("user.id", userId);
+            // Set all baggage entries as span attributes — no hardcoded key names.
+            baggage.asMap().forEach((key, entry) -> consumerSpan.setAttribute(key, entry.getValue()));
+
+            // tenant.id drives the region enrichment lookup (business logic).
+            String tenantId     = baggage.getEntryValue("tenant.id");
+            String region       = TENANT_REGIONS.getOrDefault(tenantId, "unknown");
+            String processingId = UUID.randomUUID().toString().substring(0, 8);
+
             // Enrichment attributes — visible in Tempo trace detail
             consumerSpan.setAttribute("enriched.region", region);
             consumerSpan.setAttribute("enriched.processing_id", processingId);
 
-            forward(message, tenantId, region, processingId);
+            forward(message, baggage, region, processingId);
             log.info("Enriched | tenant=" + tenantId + " region=" + region + " id=" + processingId);
         } finally {
             consumerSpan.end();
         }
     }
 
-    private void forward(Message original, String tenantId, String region, String processingId)
+    private void forward(Message original, Baggage baggage, String region, String processingId)
             throws JMSException {
         Span producerSpan = tracer.spanBuilder("enricher.forward")
             .setSpanKind(SpanKind.PRODUCER)
@@ -76,11 +78,9 @@ public class Enricher {
 
         try (Scope ignored = Context.current().with(producerSpan).makeCurrent()) {
             producerSpan.setAttribute("messaging.system", "ibmmq");
-            if (tenantId != null) producerSpan.setAttribute("tenant.id", tenantId);
+            baggage.asMap().forEach((key, entry) -> producerSpan.setAttribute(key, entry.getValue()));
 
             String originalBody = original instanceof TextMessage t ? t.getText() : "(non-text)";
-            // Append enrichment data to the message body so downstream services can use it
-            // without re-querying the registry.
             String enrichedBody = originalBody
                 + " | region=" + region
                 + " | processing_id=" + processingId;

@@ -38,8 +38,6 @@ public class Validator {
     }
 
     void handle(Message message) throws JMSException {
-        // Extract traceparent + baggage from the incoming JMS message.
-        // Context.root() ensures we don't inherit whatever the receive-loop thread holds.
         Context extractedCtx = otel.getPropagators().getTextMapPropagator()
             .extract(Context.root(), message, JmsCarrier.GETTER);
 
@@ -49,20 +47,21 @@ public class Validator {
             .startSpan();
 
         try (Scope ignored = extractedCtx.with(consumerSpan).makeCurrent()) {
-            Baggage baggage  = Baggage.fromContext(extractedCtx);
-            String tenantId  = baggage.getEntryValue("tenant.id");
-            String userId    = baggage.getEntryValue("user.id");
+            Baggage baggage = Baggage.fromContext(extractedCtx);
 
             consumerSpan.setAttribute("messaging.system", "ibmmq");
-            if (tenantId != null) consumerSpan.setAttribute("tenant.id", tenantId);
-            if (userId   != null) consumerSpan.setAttribute("user.id", userId);
+            // Set all baggage entries as span attributes — no hardcoded key names.
+            baggage.asMap().forEach((key, entry) -> consumerSpan.setAttribute(key, entry.getValue()));
+
+            // tenant.id drives business logic: required field and denylist check.
+            String tenantId = baggage.getEntryValue("tenant.id");
 
             if (tenantId == null || tenantId.isBlank()) {
                 reject(message, "missing tenant.id", consumerSpan);
             } else if (BLOCKED_TENANTS.contains(tenantId)) {
                 reject(message, "tenant blocked: " + tenantId, consumerSpan);
             } else {
-                forward(message, tenantId, userId);
+                forward(message, baggage);
                 log.info("Validated OK | tenant=" + tenantId);
             }
         } finally {
@@ -70,14 +69,14 @@ public class Validator {
         }
     }
 
-    private void forward(Message original, String tenantId, String userId) throws JMSException {
+    private void forward(Message original, Baggage baggage) throws JMSException {
         Span producerSpan = tracer.spanBuilder("validator.forward")
             .setSpanKind(SpanKind.PRODUCER)
             .startSpan();
 
         try (Scope ignored = Context.current().with(producerSpan).makeCurrent()) {
             producerSpan.setAttribute("messaging.system", "ibmmq");
-            producerSpan.setAttribute("tenant.id", tenantId);
+            baggage.asMap().forEach((key, entry) -> producerSpan.setAttribute(key, entry.getValue()));
 
             TextMessage out = session.createTextMessage(
                 original instanceof TextMessage t ? t.getText() : "(non-text)");
