@@ -16,7 +16,7 @@ Two scenarios are available:
 
 | Component            | Image / runtime                                  |
 |----------------------|--------------------------------------------------|
-| IBM MQ               | `icr.io/ibm-messaging/mq:latest`                |
+| IBM MQ               | `icr.io/ibm-messaging/mq:latest` — multi-arch; native ARM64 since 9.3.3.0 ([blog](https://community.ibm.com/community/user/blogs/richard-coppen/2023/06/30/ibm-mq-9330-container-image-now-available-for-appl)) |
 | OTel Collector       | `otel/opentelemetry-collector-contrib`          |
 | Tempo                | `grafana/tempo:2.10.7`                          |
 | Prometheus           | `prom/prometheus:latest`                        |

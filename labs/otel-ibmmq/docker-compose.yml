@@ -1,5 +1,11 @@
 services:
   ibmmq:
+    # ARM64 / Apple Silicon: native ARM64 support was introduced in IBM MQ 9.3.3.0.
+    # icr.io/ibm-messaging/mq:latest publishes a multi-arch manifest — Docker pulls
+    # the correct layer automatically on both amd64 and arm64 hosts.
+    # Caveat: the XR component (MQTT/AMQP) is not available on ARM64; this lab
+    # uses JMS only and is not affected.
+    # Ref: https://community.ibm.com/community/user/blogs/richard-coppen/2023/06/30/ibm-mq-9330-container-image-now-available-for-appl
     image: icr.io/ibm-messaging/mq:latest
     environment:
       LICENSE: accept

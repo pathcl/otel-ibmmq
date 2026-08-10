@@ -314,6 +314,29 @@ risk of a developer forgetting to call them.
 
 ---
 
+## Is the IBM MQ container image compatible with ARM64 / Apple Silicon? `#ibmmq`
+
+Yes, since **IBM MQ 9.3.3.0** (released June 2023). The `icr.io/ibm-messaging/mq`
+image publishes a multi-arch manifest — Docker and Podman automatically pull the
+correct layer for the host architecture. No `platform:` override or separate tag
+is needed.
+
+Reference: [IBM MQ 9.3.3.0 container image now available for Apple Silicon](https://community.ibm.com/community/user/blogs/richard-coppen/2023/06/30/ibm-mq-9330-container-image-now-available-for-appl)
+
+### One caveat
+
+The **IBM MQ XR component** (MQTT and AMQP based messaging) is not available on
+the ARM64 image. This lab uses JMS only — no MQTT, no AMQP — so this limitation
+does not apply.
+
+### What this means for the lab
+
+`docker-compose.yml` uses `icr.io/ibm-messaging/mq:latest`. On an ARM64 host
+(Apple M1/M2/M3) Docker pulls the ARM64 layer natively. On an amd64 host it
+pulls the amd64 layer. No configuration change is required for either platform.
+
+---
+
 ## What does the TraceQL syntax look like for querying by tenant? `#o11y`
 
 ```
