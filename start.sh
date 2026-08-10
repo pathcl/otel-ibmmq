@@ -42,6 +42,19 @@ compose_files() {
 
 cmd_up() {
   local scenario="${1:-middle}"
+
+  echo "==> Building lab plugin (otel-mq-app)"
+  cd "$LAB_DIR/otel-mq-app"
+  npm ci
+  npm run build
+
+  echo ""
+  echo "==> Building tutorial plugin (tutorial-miniops-app)"
+  cd "$PLUGIN_DIR"
+  npm ci
+  npm run build
+
+  echo ""
   # shellcheck disable=SC2046
   if [[ "$scenario" == "origin" ]]; then
     echo "==> Starting lab stack — origin scenario (gateway is the trace origin)"
@@ -50,11 +63,6 @@ cmd_up() {
   fi
 
   docker compose $(compose_files "$scenario") up -d --build
-
-  echo ""
-  echo "==> Building tutorial plugin"
-  cd "$PLUGIN_DIR"
-  npm run build
 
   echo ""
   echo "==> Starting tutorial Grafana (port 3000)"
