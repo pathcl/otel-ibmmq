@@ -167,3 +167,4 @@ Every design decision is explained in `docs/`:
 | [ibmmq-tutorial.md](docs/ibmmq-tutorial.md) | Hands-on lab journal: commands run, errors hit, and what the output taught us |
 | [ibmmq-qa.md](docs/ibmmq-qa.md) | Running Q&A log tagged #ibmmq and #o11y — reference books included |
 | [baggage-ibmmq-checklist.md](docs/baggage-ibmmq-checklist.md) | Middle-of-chain SRE checklist: SDK setup, PROPCTL, extract/inject pattern, silent bugs |
+| [ibmmq-propagation-healthcheck.md](docs/ibmmq-propagation-healthcheck.md) | Quick reference for infra and app teams to verify context propagation is working |
