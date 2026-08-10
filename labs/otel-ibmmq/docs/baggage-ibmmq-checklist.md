@@ -5,6 +5,12 @@ forwards to another. You did not write the upstream producer or the downstream
 consumer. Traces and business context (`tenant.id`, `user.id`) must flow
 through your service without being silently dropped.
 
+> **See also:** `14-sre-baggage-checklist.md` — use that file when coordinating
+> across teams before a meeting. It covers all APIs (JMS, XMS, Go, Node.js,
+> Python, AMQP, MQTT), all messaging patterns, and pre-meeting questions to
+> bring to each team. This file is for hands-on implementation and debugging
+> of a single JMS/Java mid-chain service.
+
 ## How it works
 
 Two separate things travel over IBM MQ:

@@ -128,6 +128,43 @@ Better alternatives that do not require stopping a service:
 
 ---
 
+## What are the hard requirements for baggage and context propagation over IBM MQ? `#ibmmq` `#o11y`
+
+Eight blockers — missing any one of them silently breaks propagation:
+
+### IBM MQ infrastructure (MQ admin owns this)
+
+| # | Requirement | What breaks without it |
+|---|-------------|----------------------|
+| 1 | `PROPCTL(ALL)` on every queue including DLQ | MQRFH2 stripped silently at that queue; all downstream services see no context |
+| 2 | `PROPCTL(ALL)` on every channel between queue managers | Same as above but at the network boundary between QMs |
+| 3 | Message format must not be `MQFMT_STRING` | MQRFH2 discarded regardless of PROPCTL; no recovery possible |
+
+### Application code (your team owns this)
+
+| # | Requirement | What breaks without it |
+|---|-------------|----------------------|
+| 4 | Both W3C propagators registered (`W3CTraceContextPropagator` + `W3CBaggagePropagator`) | Missing baggage propagator = traces link but all baggage values are null downstream |
+| 5 | Carrier adapter wired to JMS message properties | `inject()`/`extract()` have no way to read or write the JMS message |
+| 6 | `inject()` called on every outbound message before `send()` | No context written to the message; consumer always starts an orphan trace |
+| 7 | `extract()` called on every received message | Context present in message but never read; consumer starts an orphan trace |
+| 8 | Consumer span created with `.setParent(extractedCtx)` | Context extracted but link never formed; span is still an orphan |
+
+### What is NOT a hard requirement
+
+| Thing | Why optional |
+|-------|-------------|
+| IBM MQ activity tracing | Queue manager internal tracing; unrelated to OTel properties |
+| OTel Java agent | Manual SDK achieves the same result |
+| Instana agent | Writes the same JMS properties; PROPCTL still required regardless |
+| OTel Collector | Required to export spans, not for propagation itself |
+| Same language across services | W3C headers are plain strings; any language reads them |
+| Same OTel SDK version | Wire format is standardised; versions are interoperable |
+
+Full detail in `baggage-ibmmq-checklist.md` § Hard requirements.
+
+---
+
 ## Reference books and documentation `#ibmmq`
 
 ### IBM Redbooks (free PDF at redbooks.ibm.com)

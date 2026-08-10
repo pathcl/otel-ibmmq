@@ -8,6 +8,11 @@ or the producer/consumer codebases.
 what they need to implement, and what the infrastructure team needs to verify —
 so no time is spent on discovery that could have been done beforehand.
 
+> **See also:** `baggage-ibmmq-checklist.md` — use that file when you are
+> hands-on implementing or debugging a single JMS/Java mid-chain service.
+> It has implementation steps, the extract/inject pattern, silent bugs table,
+> and a running Q&A log. This file is for cross-team coordination before meetings.
+
 ---
 
 ## How to use this document
