@@ -198,6 +198,73 @@ monitoring, and troubleshooting. Also available as PDF bundles for offline readi
 
 ---
 
+## The producer says it's injecting context but traces are still orphaned — how do you diagnose? `#ibmmq` `#o11y`
+
+IBM MQ can silently strip MQRFH2 between PUT and GET. From the outside this
+looks identical to a producer that never injected anything. `amqsbcg` is the
+wedge — browse the message on the queue before the consumer reads it.
+
+### Step 1 — stop the consumer, send a message, browse
+
+```bash
+# Stop the consumer to create a browse window
+docker stop <validator-container>
+
+# Send a real message (use your gateway or JMS producer, not amqsput)
+curl -X POST http://localhost:8081/order -H "X-Tenant-ID: acme"
+
+# Browse the queue — message is still sitting there
+docker exec <mq-container> /opt/mqm/samp/bin/amqsbcg DEV.QUEUE.1 QM1
+
+# Restart consumer
+docker start <validator-container>
+```
+
+### Step 2 — read the Format field
+
+**MQRFH2 present — producer is doing its job:**
+```
+Format : 'MQHRF2  '
+...
+<usr><traceparent>00-abc...</traceparent><baggage>tenant.id=acme</baggage></usr>
+```
+The producer injected correctly. IBM MQ is stripping MQRFH2 after PUT, before
+the consumer's MQGET. → Go to Step 3.
+
+**MQRFH2 absent — producer is the problem:**
+```
+Format : 'MQSTR   '
+```
+`inject()` was never called, the carrier SETTER is a no-op, or the producer
+is a native-MQ application that set `MQFMT_STRING` explicitly. → Fix the
+producer or add an API exit.
+
+### Step 3 — audit PROPCTL on every queue in the path
+
+```
+DISPLAY QLOCAL(*) PROPCTL
+DISPLAY QMGR PROPCTL
+```
+
+A single queue with `PROPCTL(NONE)` anywhere in the chain drops MQRFH2
+silently — no error, no DLQ, the message is delivered but stripped.
+If messages cross queue managers, also check channels:
+
+```
+DISPLAY CHL(*) PROPCTL
+```
+
+### Decision table
+
+| `amqsbcg` shows | Consumer sees | Root cause |
+|-----------------|--------------|------------|
+| `MQHRF2` + `<usr>` present | orphan trace | PROPCTL wrong on queue or channel |
+| `MQHRF2` present, `<usr>` empty | orphan trace | Carrier SETTER is a no-op; properties written to wrong field |
+| `MQSTR` | orphan trace | Producer not injecting, or MQFMT_STRING set explicitly |
+| `MQHRF2` + `<usr>` present | connected trace | Everything working — check your Tempo query |
+
+---
+
 ## What are IBM MQ exits and how do they relate to context propagation? `#ibmmq` `#o11y`
 
 IBM MQ exits are user-written routines that IBM MQ calls automatically at
