@@ -115,24 +115,29 @@ run_req1() {
     info "Expected: validator receives message but <usr> folder is absent → orphan traces"
 
     mqsc "ALTER QLOCAL(DEV.QUEUE.1) PROPCTL(NONE)" > /dev/null
+    sleep 2   # let the queue manager propagate the PROPCTL change before the next MQPUT
 
     local tenant="break-req1-$$"
     send_and_wait "${tenant}" 15
 
-    local search; search=$(search_by_tenant "${tenant}")
-    local count; count=$(echo "$search" | count_traces)
+    # Gateway always sets span.bsi.ep from the HTTP header, so a trace will exist
+    # even when PROPCTL(NONE) strips the MQ message. The correct check is whether
+    # the validator appears in the gateway trace — if PROPCTL(NONE) stripped the
+    # MQRFH2, the validator creates an orphan trace and is absent from the gateway trace.
+    local gw_search; gw_search=$(curl -s -G "${TEMPO_URL}/api/search" \
+        --data-urlencode "q={ span.bsi.ep = \"${tenant}\" && resource.service.name = \"gateway\" }" \
+        --data-urlencode "limit=3" 2>/dev/null)
+    local gw_tid; gw_tid=$(echo "$gw_search" | first_trace_id)
 
-    if ((count == 0)); then
-        pass "REQ 1 BROKEN: No traces found for tenant ${tenant} — baggage was stripped, span.bsi.ep never set downstream"
+    if [[ -z "$gw_tid" ]]; then
+        pass "REQ 1 BROKEN: No gateway trace found for bsi.ep=${tenant} — unexpected but baggage certainly lost"
     else
-        local tid; tid=$(echo "$search" | first_trace_id)
-        local trace; trace=$(fetch_trace "${tid}")
-        local svc_line; svc_line=$(echo "$trace" | count_services)
-        local svc_count; svc_count=$(echo "$svc_line" | head -1)
-        if ((svc_count <= 1)); then
-            pass "REQ 1 BROKEN: Trace is orphaned — only 1 service in trace, propagation stopped at queue boundary"
+        local trace; trace=$(fetch_trace "${gw_tid}")
+        local svcs; svcs=$(echo "$trace" | count_services | tail -1)
+        if echo "$svcs" | grep -q "validator"; then
+            fail "REQ 1: validator IS present in gateway trace despite PROPCTL(NONE) — propagation was not broken"
         else
-            fail "REQ 1: Trace still connected despite PROPCTL(NONE) — unexpected"
+            pass "REQ 1 BROKEN: validator absent from gateway trace [${svcs}] — MQRFH2 stripped by PROPCTL(NONE), validator orphaned"
         fi
     fi
 

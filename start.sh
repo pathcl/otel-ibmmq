@@ -65,6 +65,21 @@ cmd_up() {
   docker compose $(compose_files "$scenario") up -d --build
 
   echo ""
+  echo "==> Waiting for IBM MQ (QM1) to be ready..."
+  until docker compose -f "$LAB_DIR/docker-compose.yml" exec -T ibmmq dspmq -m QM1 2>/dev/null | grep -q "Running"; do
+    sleep 3
+  done
+  echo "    QM1 running — applying PROPCTL(ALL) on pipeline queues"
+  docker compose -f "$LAB_DIR/docker-compose.yml" exec -T ibmmq bash -c '
+    echo "
+ALTER QLOCAL(DEV.QUEUE.1) PROPCTL(ALL)
+ALTER QLOCAL(DEV.QUEUE.2) PROPCTL(ALL)
+ALTER QLOCAL(DEV.QUEUE.3) PROPCTL(ALL)
+ALTER QLOCAL(DEV.DEAD.LETTER.QUEUE) PROPCTL(ALL)
+" | runmqsc QM1' 2>/dev/null | grep -E "AMQ|altered" || true
+  echo "    PROPCTL(ALL) applied"
+
+  echo ""
   echo "==> Starting tutorial Grafana (port 3000)"
   docker compose -f "$PLUGIN_DIR/docker-compose.yaml" up -d
 

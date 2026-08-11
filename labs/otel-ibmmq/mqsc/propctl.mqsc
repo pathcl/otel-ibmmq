@@ -1,0 +1,9 @@
+* Set PROPCTL(ALL) on the queue manager default and all pipeline queues.
+* This ensures MQRFH2 headers (carrying W3C traceparent + baggage) are
+* preserved regardless of whether the producer is JMS or native MQ (C/COBOL).
+* COMPAT only works when every producer is JMS-based — ALL is the safe default.
+ALTER QMGR PROPCTL(ALL)
+ALTER QLOCAL(DEV.QUEUE.1) PROPCTL(ALL)
+ALTER QLOCAL(DEV.QUEUE.2) PROPCTL(ALL)
+ALTER QLOCAL(DEV.QUEUE.3) PROPCTL(ALL)
+ALTER QLOCAL(DEV.DEAD.LETTER.QUEUE) PROPCTL(ALL)
