@@ -1,27 +1,35 @@
 #!/usr/bin/env bash
-# rewrite-baggage — update Tempo dimensions to match a new baggage attribute set.
+# rewrite-baggage — repoint the entire pipeline to a new baggage attribute set.
 #
 # Usage: ./rewrite-baggage attr1 attr2 [attr3 ...]
 #
-# Services automatically forward every X-* HTTP header into W3C Baggage and
-# set all baggage entries as span attributes — no service changes are needed.
-# This script only updates the Tempo dimensions list so the new attributes
-# appear as Prometheus labels in service-graph and span metrics.
+# What it does:
+#   1. Updates REQUIRED_BAGGAGE_KEY in docker-compose.yml and
+#      docker-compose.upstream.yml to the first attribute (the required field).
+#   2. Updates Tempo dimensions so the new attributes appear as Prometheus labels.
 #
-# After running, restart Tempo to apply:
-#   docker compose -f labs/otel-ibmmq/docker-compose.yml up -d tempo
+# Services forward every X-* HTTP header into W3C Baggage automatically —
+# no rebuild is ever needed. Only a container restart is required.
 #
-# Example — add region.id without rebuilding any service:
-#   ./rewrite-baggage tenant.id user.id region.id
-#   docker compose -f labs/otel-ibmmq/docker-compose.yml up -d tempo
+# Example — switch to business-context headers:
+#   ./rewrite-baggage bsi.ch bsi.cj bsi.ep
+#   docker compose -f labs/otel-ibmmq/docker-compose.yml \
+#                  -f labs/otel-ibmmq/docker-compose.upstream.yml \
+#                  up -d gateway validator upstream tempo
+#
 #   curl -X POST http://localhost:8081/order \
-#     -H "X-Tenant-ID: acme" -H "X-User-ID: u1" -H "X-Region-ID: eu-west-1"
+#     -H "X-bsi-ch: android" \
+#     -H "X-bsi-cj: MoneyTransfer" \
+#     -H "X-bsi-ep: one"
+#
+# Restore defaults:
+#   ./rewrite-baggage tenant.id user.id
 
 set -euo pipefail
 
 if [[ $# -eq 0 ]]; then
   echo "Usage: $0 attr1 attr2 [attr3 ...]" >&2
-  echo "Example: $0 tenant.id user.id region.id" >&2
+  echo "Example: $0 bsi.ch bsi.cj bsi.ep" >&2
   exit 1
 fi
 
@@ -30,27 +38,45 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 python3 - "$@" << 'EOF'
 import sys, re
 
-attrs = sys.argv[1:]
-indent = "        "
-lines = "\n".join(f"{indent}- {a}" for a in attrs) + "\n"
+attrs      = sys.argv[1:]
+first_attr = attrs[0]
+indent     = "        "
+dim_lines  = "\n".join(f"{indent}- {a}" for a in attrs) + "\n"
 
-path = "labs/otel-ibmmq/tempo/tempo.yaml"
-src = open(path).read()
+# ── tempo/tempo.yaml ────────────────────────────────────────────────────────
+tempo_path = "labs/otel-ibmmq/tempo/tempo.yaml"
+src = open(tempo_path).read()
 
-# Replace dimensions list under service_graphs processor
 src = re.sub(
     r'(    service_graphs:\n      dimensions:\n)(?:        - .+\n)+',
-    r'\g<1>' + lines,
+    r'\g<1>' + dim_lines,
     src
 )
-# Replace dimensions list under span_metrics processor
 src = re.sub(
     r'(    span_metrics:\n      dimensions:\n)(?:        - .+\n)+',
-    r'\g<1>' + lines,
+    r'\g<1>' + dim_lines,
     src
 )
+open(tempo_path, "w").write(src)
 
-open(path, "w").write(src)
-print(f"tempo.yaml dimensions updated: {attrs}")
-print("Restart Tempo: docker compose -f labs/otel-ibmmq/docker-compose.yml up -d tempo")
+# ── docker-compose.yml ──────────────────────────────────────────────────────
+for path in [
+    "labs/otel-ibmmq/docker-compose.yml",
+    "labs/otel-ibmmq/docker-compose.upstream.yml",
+]:
+    src = open(path).read()
+    src = re.sub(
+        r'(REQUIRED_BAGGAGE_KEY:)\s+\S+(\s*#[^\n]*)?',
+        rf'\1 {first_attr}',
+        src
+    )
+    open(path, "w").write(src)
+
+print(f"Required key  → {first_attr}")
+print(f"Tempo dims    → {attrs}")
+print()
+print("Restart affected containers (no rebuild needed):")
+print("  docker compose -f labs/otel-ibmmq/docker-compose.yml \\")
+print("                 -f labs/otel-ibmmq/docker-compose.upstream.yml \\")
+print("                 up -d gateway validator upstream tempo")
 EOF

@@ -53,16 +53,18 @@ public class Validator {
             // Set all baggage entries as span attributes — no hardcoded key names.
             baggage.asMap().forEach((key, entry) -> consumerSpan.setAttribute(key, entry.getValue()));
 
-            // tenant.id drives business logic: required field and denylist check.
-            String tenantId = baggage.getEntryValue("tenant.id");
+            // The primary key drives required-field and denylist checks.
+            // Configurable via REQUIRED_BAGGAGE_KEY; defaults to tenant.id.
+            String requiredKey   = env("REQUIRED_BAGGAGE_KEY", "tenant.id");
+            String primaryValue  = requiredKey.isEmpty() ? null : baggage.getEntryValue(requiredKey);
 
-            if (tenantId == null || tenantId.isBlank()) {
-                reject(message, "missing tenant.id", consumerSpan);
-            } else if (BLOCKED_TENANTS.contains(tenantId)) {
-                reject(message, "tenant blocked: " + tenantId, consumerSpan);
+            if (!requiredKey.isEmpty() && (primaryValue == null || primaryValue.isBlank())) {
+                reject(message, "missing " + requiredKey, consumerSpan);
+            } else if (primaryValue != null && BLOCKED_TENANTS.contains(primaryValue)) {
+                reject(message, requiredKey + " blocked: " + primaryValue, consumerSpan);
             } else {
                 forward(message, baggage);
-                log.info("Validated OK | tenant=" + tenantId);
+                log.info("Validated OK | " + requiredKey + "=" + primaryValue);
             }
         } finally {
             consumerSpan.end();

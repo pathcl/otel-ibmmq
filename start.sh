@@ -85,13 +85,13 @@ cmd_up() {
     echo "    Gateway (trace origin):     http://localhost:8080"
     echo ""
     echo "Send a test message (gateway is the entry point):"
-    echo "    curl -X POST http://localhost:8080/send -H 'X-Tenant-ID: acme' -H 'X-User-ID: user1'"
+    echo "    curl -X POST http://localhost:8080/send -H 'X-bsi-ep: checkout' -H 'X-bsi-ch: android' -H 'X-bsi-cj: MoneyTransfer'"
   else
     echo "    Upstream (trace origin):    http://localhost:8081"
     echo "    Gateway (MQ bridge):        http://localhost:8080"
     echo ""
     echo "Send a test message (enters at upstream — full middle-of-chain trace):"
-    echo "    curl -X POST http://localhost:8081/order -H 'X-Tenant-ID: acme' -H 'X-User-ID: user1'"
+    echo "    curl -X POST http://localhost:8081/order -H 'X-bsi-ep: checkout' -H 'X-bsi-ch: android' -H 'X-bsi-cj: MoneyTransfer'"
   fi
   echo "    IBM MQ console:             https://localhost:9443  (admin / passw0rd)"
 }

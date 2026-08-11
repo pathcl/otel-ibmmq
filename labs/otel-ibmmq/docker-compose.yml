@@ -74,6 +74,7 @@ services:
     build: ./gateway
     environment:
       OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      REQUIRED_BAGGAGE_KEY: bsi.ep
       IBM_MQ_HOST: ibmmq
       IBM_MQ_PORT: "1414"
       IBM_MQ_QUEUE_MANAGER: QM1
@@ -95,6 +96,7 @@ services:
     build: ./validator
     environment:
       OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      REQUIRED_BAGGAGE_KEY: bsi.ep
       IBM_MQ_HOST: ibmmq
       IBM_MQ_PORT: "1414"
       IBM_MQ_QUEUE_MANAGER: QM1

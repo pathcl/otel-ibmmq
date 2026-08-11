@@ -349,3 +349,39 @@ Unscoped (matches span or resource attributes):
 ```
 
 `span["tenant.id"]` is not valid TraceQL — it returns HTTP 400.
+
+---
+
+## OTel Java agent vs manual SDK (JmsCarrier) — which should we use and why? `#o11y` `#ibmmq`
+
+### What the OTel Java agent gives you for free
+
+- **Auto-instrumented JMS spans** — the agent intercepts `MessageProducer.send()` and
+  `MessageConsumer.receive()` via bytecode and creates producer/consumer spans with
+  standard `messaging.*` attributes automatically.
+- **W3C propagation out of the box** — it injects and extracts `traceparent` / `baggage`
+  into JMS message properties without a hand-written `JmsCarrier`.
+- **Breadth** — a single `-javaagent:opentelemetry-javaagent.jar` JVM flag also
+  auto-instruments JDBC, HTTP clients, thread pools, and hundreds of other libraries.
+
+### Why it does not help this lab
+
+| Concern | Detail |
+|---|---|
+| Custom baggage still needs SDK code | The agent propagates whatever is already in W3C Baggage, but it has no knowledge of the `X-bsi-*` HTTP header convention. Gateway and upstream still need manual SDK code to collect those headers, derive baggage keys (`X-bsi-ep` → `bsi.ep`), and build the `Baggage` object. The agent handles the MQ hop, not the HTTP-to-baggage translation. |
+| Double instrumentation | The agent creates its own JMS spans. Manual spans (`gateway.send`, `validator.handle`, etc.) would become children of the agent's spans or conflict with them — requiring either fighting the agent or stripping out the manual spans and losing custom naming and attribute control. |
+| Less pedagogical clarity | The agent is bytecode magic. The explicit `JmsCarrier` code shows exactly how context crosses the MQ wire, which is the point of the lab. |
+| PROPCTL is still your problem | The agent does not fix IBM MQ stripping MQRFH2 headers. `PROPCTL(ALL)` is still required on the queue manager side for the agent's inject/extract to survive the broker hop. |
+
+### When the agent wins
+
+Existing JMS apps with **zero OTel code** and no custom propagation logic. Drop in
+the jar, get traces for free — no application changes required. This is the JVM-side
+equivalent of an IBM MQ API exit: instrumentation without touching the application.
+
+### Verdict for this lab
+
+The manual SDK approach (`JmsCarrier` + explicit span builders) gives more control,
+clearer pedagogy, and is actually less work here — SDK code is required anyway for
+the `bsi.*` attribute logic. Adding the agent would introduce a layer without
+removing any existing code.

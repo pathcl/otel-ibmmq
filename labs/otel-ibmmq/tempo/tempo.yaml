@@ -21,12 +21,14 @@ metrics_generator:
   processor:
     service_graphs:
       dimensions:
-        - tenant.id
-        - user.id
+        - bsi.ep
+        - bsi.ch
+        - bsi.cj
     span_metrics:
       dimensions:
-        - tenant.id
-        - user.id
+        - bsi.ep
+        - bsi.ch
+        - bsi.cj
 
 storage:
   trace:

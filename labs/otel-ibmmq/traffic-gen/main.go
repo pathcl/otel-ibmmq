@@ -14,30 +14,31 @@ import (
 )
 
 type msg struct {
-	tenantID string
-	userID   string
+	ep string // bsi.ep — entry point
+	ch string // bsi.ch — channel
+	cj string // bsi.cj — customer journey
 }
 
-// Happy-path tenants get 5 slots each; DLQ tenants get 1 slot each (~17% error rate).
+// Happy-path entries get 5 slots each; DLQ entries get 1-2 slots (~17% error rate).
 var pool = []msg{
-	{tenantID: "acme", userID: "alice"},
-	{tenantID: "acme", userID: "bob"},
-	{tenantID: "acme", userID: "carol"},
-	{tenantID: "acme", userID: "alice"},
-	{tenantID: "acme", userID: "bob"},
-	{tenantID: "globex", userID: "dave"},
-	{tenantID: "globex", userID: "eve"},
-	{tenantID: "globex", userID: "dave"},
-	{tenantID: "globex", userID: "eve"},
-	{tenantID: "globex", userID: "frank"},
-	{tenantID: "initech", userID: "grace"},
-	{tenantID: "initech", userID: "hank"},
-	{tenantID: "initech", userID: "grace"},
-	{tenantID: "initech", userID: "hank"},
-	{tenantID: "initech", userID: "iris"},
-	{tenantID: "bad-tenant", userID: "mallory"}, // → DLQ
-	{tenantID: "blocked", userID: "trudy"},       // → DLQ
-	{tenantID: "blocked", userID: "trudy"},
+	{ep: "checkout", ch: "android", cj: "MoneyTransfer"},
+	{ep: "checkout", ch: "android", cj: "MoneyTransfer"},
+	{ep: "checkout", ch: "ios", cj: "MoneyTransfer"},
+	{ep: "checkout", ch: "web", cj: "AccountOpen"},
+	{ep: "checkout", ch: "web", cj: "AccountOpen"},
+	{ep: "payment", ch: "android", cj: "CardActivation"},
+	{ep: "payment", ch: "ios", cj: "CardActivation"},
+	{ep: "payment", ch: "web", cj: "MoneyTransfer"},
+	{ep: "payment", ch: "android", cj: "MoneyTransfer"},
+	{ep: "payment", ch: "ios", cj: "AccountOpen"},
+	{ep: "account", ch: "web", cj: "CardActivation"},
+	{ep: "account", ch: "android", cj: "AccountOpen"},
+	{ep: "account", ch: "ios", cj: "CardActivation"},
+	{ep: "account", ch: "web", cj: "MoneyTransfer"},
+	{ep: "account", ch: "ios", cj: "AccountOpen"},
+	{ep: "blocked", ch: "android", cj: "MoneyTransfer"},  // → DLQ
+	{ep: "bad-tenant", ch: "web", cj: "AccountOpen"},     // → DLQ
+	{ep: "blocked", ch: "ios", cj: "CardActivation"},     // → DLQ
 }
 
 func main() {
@@ -46,7 +47,7 @@ func main() {
 	flag.Parse()
 
 	log.Printf("traffic-gen → %s  (interval=%s)", *url, *rate)
-	log.Printf("tenants: %s", uniqueTenants())
+	log.Printf("entry-points: %s", uniqueEps())
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	ticker := time.NewTicker(*rate)
@@ -66,10 +67,10 @@ func main() {
 			err := post(client, *url, m)
 			if err != nil {
 				errs++
-				log.Printf("FAIL tenant=%-12s user=%-8s err=%v", m.tenantID, m.userID, err)
+				log.Printf("FAIL ep=%-12s ch=%-8s cj=%s  err=%v", m.ep, m.ch, m.cj, err)
 			} else {
 				ok++
-				log.Printf("OK   tenant=%-12s user=%s", m.tenantID, m.userID)
+				log.Printf("OK   ep=%-12s ch=%-8s cj=%s", m.ep, m.ch, m.cj)
 			}
 		}
 	}
@@ -80,8 +81,9 @@ func post(client *http.Client, url string, m msg) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("X-Tenant-ID", m.tenantID)
-	req.Header.Set("X-User-ID", m.userID)
+	req.Header.Set("X-bsi-ep", m.ep)
+	req.Header.Set("X-bsi-ch", m.ch)
+	req.Header.Set("X-bsi-cj", m.cj)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -95,13 +97,13 @@ func post(client *http.Client, url string, m msg) error {
 	return nil
 }
 
-func uniqueTenants() string {
+func uniqueEps() string {
 	seen := map[string]bool{}
 	var out []string
 	for _, m := range pool {
-		if !seen[m.tenantID] {
-			seen[m.tenantID] = true
-			out = append(out, m.tenantID)
+		if !seen[m.ep] {
+			seen[m.ep] = true
+			out = append(out, m.ep)
 		}
 	}
 	return strings.Join(out, ", ")

@@ -19,11 +19,11 @@ public class Enricher {
 
     private static final Logger log = Logger.getLogger(Enricher.class.getName());
 
-    // Simulates a static region lookup that would normally hit an internal registry.
-    private static final Map<String, String> TENANT_REGIONS = Map.of(
-        "acme",  "eu-west-1",
-        "beta",  "us-east-1",
-        "gamma", "ap-southeast-1"
+    // Simulates a static region lookup based on entry point (bsi.ep).
+    private static final Map<String, String> EP_REGIONS = Map.of(
+        "checkout", "eu-west-1",
+        "payment",  "us-east-1",
+        "account",  "ap-southeast-1"
     );
 
     private final OpenTelemetry otel;
@@ -54,9 +54,9 @@ public class Enricher {
             // Set all baggage entries as span attributes — no hardcoded key names.
             baggage.asMap().forEach((key, entry) -> consumerSpan.setAttribute(key, entry.getValue()));
 
-            // tenant.id drives the region enrichment lookup (business logic).
-            String tenantId     = baggage.getEntryValue("tenant.id");
-            String region       = TENANT_REGIONS.getOrDefault(tenantId, "unknown");
+            // bsi.ep drives the region enrichment lookup (business logic).
+            String ep           = baggage.getEntryValue("bsi.ep");
+            String region       = ep != null ? EP_REGIONS.getOrDefault(ep, "unknown") : "unknown";
             String processingId = UUID.randomUUID().toString().substring(0, 8);
 
             // Enrichment attributes — visible in Tempo trace detail
@@ -64,7 +64,7 @@ public class Enricher {
             consumerSpan.setAttribute("enriched.processing_id", processingId);
 
             forward(message, baggage, region, processingId);
-            log.info("Enriched | tenant=" + tenantId + " region=" + region + " id=" + processingId);
+            log.info("Enriched | ep=" + ep + " region=" + region + " id=" + processingId);
         } finally {
             consumerSpan.end();
         }

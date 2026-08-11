@@ -23,6 +23,7 @@ services:
       OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
       GATEWAY_URL: http://gateway:8080/send
       SERVICE_NAME: upstream
+      REQUIRED_BAGGAGE_KEY: bsi.ep
     ports:
       - "8081:8081"
     depends_on:

@@ -74,9 +74,11 @@ public class Gateway {
             }
         });
 
-        // tenant.id is required — it drives validation and routing downstream.
-        if (!values.containsKey("tenant.id") || values.get("tenant.id").isBlank()) {
-            byte[] msg = "X-Tenant-ID header or upstream baggage required\n".getBytes();
+        // Optional required key — configurable via REQUIRED_BAGGAGE_KEY env var.
+        // Default is tenant.id; set to empty string to accept any non-empty X-* set.
+        String requiredKey = env("REQUIRED_BAGGAGE_KEY", "tenant.id");
+        if (!requiredKey.isEmpty() && (!values.containsKey(requiredKey) || values.get(requiredKey).isBlank())) {
+            byte[] msg = (requiredKey + " required (send X-" + requiredKey.replace('.', '-').toUpperCase() + " header)\n").getBytes();
             exchange.sendResponseHeaders(400, msg.length);
             exchange.getResponseBody().write(msg);
             return;
@@ -101,8 +103,7 @@ public class Gateway {
 
             Session session = jmsConnection.createSession(false, Session.AUTO_ACKNOWLEDGE);
             Queue queue    = session.createQueue(queueName);
-            String tenantId = values.get("tenant.id");
-            TextMessage message = session.createTextMessage("order from tenant=" + tenantId);
+            TextMessage message = session.createTextMessage("order | " + values);
 
             otel.getPropagators().getTextMapPropagator()
                 .inject(Context.current(), message, JmsCarrier.SETTER);
@@ -110,7 +111,7 @@ public class Gateway {
             session.createProducer(queue).send(message);
             session.close();
 
-            byte[] body = ("sent | tenant=" + tenantId + "\n").getBytes();
+            byte[] body = ("sent | " + values + "\n").getBytes();
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             log.info("Message sent | " + values);

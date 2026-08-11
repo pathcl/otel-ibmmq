@@ -101,11 +101,12 @@ func handleOrder(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	tenantID := attrs["tenant.id"]
-	if tenantID == "" {
-		http.Error(w, "X-Tenant-ID required", http.StatusBadRequest)
+	requiredKey := env("REQUIRED_BAGGAGE_KEY", "tenant.id")
+	if requiredKey != "" && attrs[requiredKey] == "" {
+		http.Error(w, requiredKey+" required (send X-"+strings.ToUpper(strings.ReplaceAll(requiredKey, ".", "-"))+" header)", http.StatusBadRequest)
 		return
 	}
+	tenantID := attrs["tenant.id"]
 	userID := attrs["user.id"]
 	if userID == "" {
 		userID = "anonymous"
