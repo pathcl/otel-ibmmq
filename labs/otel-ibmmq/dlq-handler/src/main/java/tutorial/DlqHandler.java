@@ -56,8 +56,8 @@ public class DlqHandler {
             // Set all baggage entries as span attributes — no hardcoded key names.
             baggage.asMap().forEach((key, entry) -> span.setAttribute(key, entry.getValue()));
 
-            // tenant.id drives the metric dimension (business logic).
-            String tenantId = baggage.getEntryValue("tenant.id");
+            // bsi.ep drives the metric dimension (business logic).
+            String ep = baggage.getEntryValue("bsi.ep");
 
             // Mark span as error — this lights up the arc__error arc on the node in
             // the Grafana node graph panel.
@@ -65,12 +65,12 @@ public class DlqHandler {
             span.recordException(new RuntimeException("DLQ: " + reason));
 
             rejectedCounter.add(1, Attributes.builder()
-                .put("tenant.id",  tenantId != null ? tenantId : "unknown")
-                .put("dlq.reason", reason   != null ? reason   : "unknown")
+                .put("bsi.ep",     ep     != null ? ep     : "unknown")
+                .put("dlq.reason", reason != null ? reason : "unknown")
                 .build());
 
             String body = message instanceof TextMessage t ? t.getText() : "(non-text)";
-            log.warning("DLQ | tenant=" + tenantId + " reason=" + reason + " body=" + body);
+            log.warning("DLQ | ep=" + ep + " reason=" + reason + " body=" + body);
 
             // In a real system the handler would either:
             //   1. Retry after fixing the message (put back to DEV.QUEUE.1)

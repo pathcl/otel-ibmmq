@@ -14,10 +14,10 @@ spans (OTel SDK)
   ▼
 Tempo metrics_generator
   │  service-graphs processor pairs client + server spans
-  │  span attribute tenant.id → Prometheus label tenant_id
+  │  span attribute bsi.ep → Prometheus label bsi_ep
   ▼
 Prometheus (remote_write receiver on /api/v1/write)
-  │  traces_service_graph_request_total{client, server, tenant_id}
+  │  traces_service_graph_request_total{client, server, bsi_ep}
   ▼
 Grafana Scenes plugin
   │  Tempo serviceMap query   → nodeGraph panel
@@ -38,10 +38,10 @@ metrics_generator:
   processor:
     service_graphs:
       dimensions:
-        - tenant.id      # becomes tenant_id in Prometheus labels
+        - bsi.ep      # becomes bsi_ep in Prometheus labels
     span_metrics:
       dimensions:
-        - tenant.id
+        - bsi.ep
 
 overrides:
   defaults:
@@ -50,7 +50,7 @@ overrides:
 ```
 
 `dimensions` tells the service-graphs processor to promote the OTel span attribute
-`tenant.id` (dot → underscore by convention) into a Prometheus label. Without this,
+`bsi.ep` (dot → underscore by convention) into a Prometheus label. Without this,
 metrics would only have `client` and `server` labels.
 
 ## Prometheus config change (`docker-compose.yml`)
@@ -70,7 +70,7 @@ EmbeddedScene
 ├── $variables    SceneVariableSet
 │     └── QueryVariable($tenant)
 │           datasource: prometheus
-│           query: label_values(traces_service_graph_request_total, tenant_id)
+│           query: label_values(traces_service_graph_request_total, bsi_ep)
 │           includeAll: true   → "All" option maps to regex .*
 ├── body          SceneFlexLayout (column)
 │     ├── SceneFlexItem          nodeGraph panel
@@ -108,12 +108,12 @@ When the user selects "All", Grafana interpolates `$tenant` as `.*`. The Prometh
 query becomes:
 
 ```promql
-sum by (client, server, tenant_id) (
-  rate(traces_service_graph_request_total{tenant_id=~".*"}[5m])
+sum by (client, server, bsi_ep) (
+  rate(traces_service_graph_request_total{bsi_ep=~".*"}[5m])
 )
 ```
 
-which matches every tenant. Selecting `acme` narrows to `tenant_id=~"acme"`.
+which matches every tenant. Selecting `acme` narrows to `bsi_ep=~"checkout"`.
 
 ## Plugin loading (unsigned)
 
@@ -137,12 +137,12 @@ After changing plugin source, run `npm run build` inside
 
 ```bash
 # Single tenant
-curl -X POST http://localhost:8080/send -H 'X-Tenant-ID: acme' -H 'X-User-ID: user1'
+curl -X POST http://localhost:8080/send -H 'X-bsi-ep: acme' -H 'X-bsi-ch: user1'
 
 # Generate data for multiple tenants
 for t in acme beta gamma; do
   for i in $(seq 1 10); do
-    curl -s -X POST http://localhost:8080/send -H "X-Tenant-ID: $t" -H "X-User-ID: user$i"
+    curl -s -X POST http://localhost:8080/send -H "X-bsi-ep: $t" -H "X-bsi-ch: user$i"
   done
 done
 ```

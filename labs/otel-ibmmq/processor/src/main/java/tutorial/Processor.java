@@ -30,7 +30,7 @@ public class Processor {
 
         Meter meter = otel.getMeter("tutorial.processor");
         this.messagesProcessed = meter.counterBuilder("messages.processed")
-            .setDescription("Total JMS messages processed by tenant")
+            .setDescription("Total JMS messages processed by entry point")
             .setUnit("{message}")
             .build();
     }
@@ -54,18 +54,17 @@ public class Processor {
             // Set all baggage entries as span attributes — no hardcoded key names.
             baggage.asMap().forEach((key, entry) -> span.setAttribute(key, entry.getValue()));
 
-            // tenant.id drives the metric dimension (business logic).
-            String tenantId = baggage.getEntryValue("tenant.id");
-            String userId   = baggage.getEntryValue("user.id");
+            // bsi.ep drives the metric dimension (business logic).
+            String ep = baggage.getEntryValue("bsi.ep");
 
-            // Record metric with tenant dimension — this is what powers the Grafana dashboard.
+            // Record metric with entry-point dimension — this is what powers the Grafana dashboard.
             messagesProcessed.add(1, Attributes.builder()
-                .put("tenant.id", tenantId != null ? tenantId : "unknown")
+                .put("bsi.ep", ep != null ? ep : "unknown")
                 .build()
             );
 
             String body = message instanceof TextMessage t ? t.getText() : "(non-text)";
-            log.info("Processed: " + body + " | tenant=" + tenantId + " user=" + userId);
+            log.info("Processed: " + body + " | ep=" + ep);
         } finally {
             span.end();
         }

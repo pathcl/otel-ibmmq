@@ -50,10 +50,10 @@ every service's business logic.
 4. processor extracts the headers, creates a child span (`processor.handle`, kind=CONSUMER)
 5. Both spans arrive at otel-collector via OTLP/gRPC
 6. otel-collector forwards to Tempo via OTLP/gRPC
-7. Grafana queries Tempo and shows the full trace with tenant.id on both spans
+7. Grafana queries Tempo and shows the full trace with bsi.ep on both spans
 
 **Metric flow**
-1. processor increments `messages.processed` counter (label: `tenant.id`)
+1. processor increments `messages.processed` counter (label: `bsi.ep`)
 2. OTel SDK exports the counter to otel-collector via OTLP/gRPC every 60s
 3. otel-collector exposes the metric on :8889 in Prometheus format
 4. Prometheus scrapes :8889 every 15s

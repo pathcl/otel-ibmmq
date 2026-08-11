@@ -43,7 +43,7 @@ Run a burst of messages and check which container handled each one:
 ```bash
 for i in $(seq 1 20); do
   curl -s -X POST http://localhost:8080/send \
-    -H "X-Tenant-ID: acme" -H "X-User-ID: user$i" > /dev/null
+    -H "X-bsi-ep: acme" -H "X-bsi-ch: user$i" > /dev/null
 done
 
 docker compose -f labs/otel-ibmmq/docker-compose.yml logs processor \

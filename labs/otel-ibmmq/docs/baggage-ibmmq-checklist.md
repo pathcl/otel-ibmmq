@@ -2,7 +2,7 @@
 
 Scenario: your team owns a service that receives from one IBM MQ queue and
 forwards to another. You did not write the upstream producer or the downstream
-consumer. Traces and business context (`tenant.id`, `user.id`) must flow
+consumer. Traces and business context (`bsi.ep`, `bsi.ch`) must flow
 through your service without being silently dropped.
 
 > **See also:** `14-sre-baggage-checklist.md` — use that file when coordinating
@@ -17,7 +17,7 @@ Two separate things travel over IBM MQ:
 
 ```
 traceparent: 00-<traceId-128bit>-<parentSpanId-64bit>-01
-baggage:     tenant.id=acme,user.id=user42
+baggage:     bsi.ep=acme,bsi.ch=user42
 ```
 
 They are **separate propagators** and must both be registered. IBM MQ has no
@@ -43,10 +43,10 @@ try (Scope ignored = extractedCtx.with(consumerSpan).makeCurrent()) {
 
     // 3. Read baggage — it lives in the context, not in the span
     Baggage baggage = Baggage.fromContext(extractedCtx);
-    String tenantId = baggage.getEntryValue("tenant.id");
+    String ep = baggage.getEntryValue("bsi.ep");
 
     // 4. Copy to span attributes explicitly (baggage ≠ span attributes)
-    if (tenantId != null) consumerSpan.setAttribute("tenant.id", tenantId);
+    if (ep != null) consumerSpan.setAttribute("bsi.ep", ep);
 
     // 5. Forward: producer span + inject while scope is active
     Span producerSpan = tracer.spanBuilder("your-service.forward")
@@ -88,7 +88,7 @@ try (Scope ignored = extractedCtx.with(consumerSpan).makeCurrent()) {
 ```
 
 Missing `W3CBaggagePropagator` is the most common silent bug: traces link
-correctly but `baggage.getEntryValue("tenant.id")` returns `null` everywhere.
+correctly but `baggage.getEntryValue("bsi.ep")` returns `null` everywhere.
 
 ---
 
@@ -143,7 +143,7 @@ Look for `traceparent` and `baggage` entries in the MQRFH2 `<usr>` folder.
       `traceparent` → `traceparent`, `baggage` → `baggage` (W3C header names
       contain no hyphens or dots so they pass through unchanged)
 - [ ] Confirm extraction worked before continuing:
-      `Baggage.fromContext(extractedCtx).getEntryValue("tenant.id") != null`
+      `Baggage.fromContext(extractedCtx).getEntryValue("bsi.ep") != null`
 
 ---
 
@@ -157,12 +157,12 @@ Look for `traceparent` and `baggage` entries in the MQRFH2 `<usr>` folder.
 - [ ] Baggage values are copied to span attributes explicitly:
 
 ```java
-span.setAttribute("tenant.id", baggage.getEntryValue("tenant.id"));
+span.setAttribute("bsi.ep", baggage.getEntryValue("bsi.ep"));
 ```
 
 Baggage travels in the `Context` object. It does **not** automatically appear
 as span attributes — if you skip this step the span is invisible in Tempo
-queries that filter by `tenant.id`.
+queries that filter by `bsi.ep`.
 
 - [ ] Do not construct a `Baggage.builder()` from scratch unless you are
       adding new entries — building fresh loses all upstream values. Instead:
@@ -197,8 +197,8 @@ If your team is only supposed to forward certain attributes and strip others:
 
 ```java
 Baggage filtered = Baggage.builder()
-    .put("tenant.id", baggage.getEntryValue("tenant.id"))  // keep
-    .put("user.id",   baggage.getEntryValue("user.id"))    // keep
+    .put("bsi.ep", baggage.getEntryValue("bsi.ep"))  // keep
+    .put("bsi.ch",   baggage.getEntryValue("bsi.ch"))    // keep
     // internal.key intentionally omitted — not forwarded downstream
     .build();
 Context ctx = filtered.storeInContext(extractedCtx.with(consumerSpan));
@@ -217,7 +217,7 @@ dump. Look for:
 ```
 <usr>
   <traceparent>00-aabbcc...ff-0011223344556677-01</traceparent>
-  <baggage>tenant.id=acme,user.id=user42</baggage>
+  <baggage>bsi.ep=acme,bsi.ch=user42</baggage>
 </usr>
 ```
 
@@ -227,13 +227,13 @@ the upstream producer is missing `W3CBaggagePropagator` in its SDK config.
 In Tempo, query by tenant to verify end-to-end:
 
 ```
-{ span.tenant.id = "acme" }
+{ span.bsi.ep = "checkout" }
 ```
 
 - Consumer span appears, linked to upstream → extract + parent linking correct
 - Consumer span appears but **not linked** → traceparent extraction failed
   (check PROPCTL, check getter sanitize logic)
-- Consumer span linked but downstream spans have no `tenant.id` → inject is
+- Consumer span linked but downstream spans have no `bsi.ep` → inject is
   missing or running outside active scope
 - Nothing appears → PROPCTL strips all properties; confirm with `amqsbcg`
 
@@ -243,7 +243,7 @@ In Tempo, query by tenant to verify end-to-end:
 
 | Bug | Symptom in Tempo |
 |-----|-----------------|
-| Missing `W3CBaggagePropagator` | Traces link correctly; all `tenant.id` span attributes null |
+| Missing `W3CBaggagePropagator` | Traces link correctly; all `bsi.ep` span attributes null |
 | `PROPCTL(NONE)` on queue | Orphan traces — no `traceparent` extracted; new trace-id starts at your service |
 | `Context.current()` used in extract | Span linked to receive-loop thread, not upstream producer |
 | `inject()` called after `span.end()` | `traceparent` forwarded; `baggage` header absent |
@@ -407,12 +407,12 @@ Context extracted = propagator.extract(Context.root(), message, JmsCarrier.GETTE
 ```
 
 **3. Custom tenant-dimensioned metrics** — the agent creates messaging metrics
-with fixed attribute names. Getting `messages.processed{tenant.id="acme"}` in
+with fixed attribute names. Getting `messages.processed{bsi.ep="checkout"}` in
 a shape that maps directly to a Grafana variable requires SDK:
 
 ```java
 messagesProcessed.add(1, Attributes.builder()
-    .put("tenant.id", tenantId)
+    .put("bsi.ep", ep)
     .build());
 ```
 
@@ -421,10 +421,10 @@ attach the agent for automatic tracing of all JMS/HTTP traffic; add SDK calls
 only for custom spans and tenant-dimensioned metrics.
 
 `OTEL_JAVA_EXPERIMENTAL_SPAN_ATTRIBUTES_COPY_FROM_BAGGAGE_INCLUDE` is a Java
-agent flag that automates the manual `span.setAttribute("tenant.id", ...)` step:
+agent flag that automates the manual `span.setAttribute("bsi.ep", ...)` step:
 
 ```bash
-OTEL_JAVA_EXPERIMENTAL_SPAN_ATTRIBUTES_COPY_FROM_BAGGAGE_INCLUDE=tenant.id,user.id
+OTEL_JAVA_EXPERIMENTAL_SPAN_ATTRIBUTES_COPY_FROM_BAGGAGE_INCLUDE=bsi.ep,bsi.ch
 ```
 
 With the agent and that flag, every span gets those attributes automatically as
@@ -464,8 +464,8 @@ for (Context ctx : upstreamContexts) {
 }
 ```
 
-Baggage is also ambiguous in fan-in — if upstream-a has `tenant.id=acme` and
-upstream-b has `tenant.id=globex`, decide which to forward before the team
+Baggage is also ambiguous in fan-in — if upstream-a has `bsi.ep=acme` and
+upstream-b has `bsi.ep=globex`, decide which to forward before the team
 meeting, not during incident response.
 
 **DLQ** requires that the rejected message carries `traceparent` so the
@@ -541,7 +541,7 @@ Look for:
 ```
 <usr>
   <traceparent>00-aabbccdd...</traceparent>
-  <baggage>tenant.id=acme,user.id=user42</baggage>
+  <baggage>bsi.ep=acme,bsi.ch=user42</baggage>
 </usr>
 ```
 
@@ -602,7 +602,7 @@ If properties survive you will see the `<usr>` folder in the MQRFH2 output:
 ```
 <usr>
   <traceparent>00-aabbccdd...</traceparent>
-  <baggage>tenant.id=acme,user.id=user42</baggage>
+  <baggage>bsi.ep=acme,bsi.ch=user42</baggage>
 </usr>
 ```
 
@@ -618,9 +618,9 @@ though the upstream producer is correctly injecting `traceparent`.
 The distinction from other causes:
 
 - `traceparent` and `baggage` both missing → `PROPCTL` is stripping everything
-- Traces link correctly but `tenant.id` attributes are null everywhere →
+- Traces link correctly but `bsi.ep` attributes are null everywhere →
   `PROPCTL` is fine; `W3CBaggagePropagator` is missing from the SDK config
-- Traces link correctly, `tenant.id` present on some spans but not downstream
+- Traces link correctly, `bsi.ep` present on some spans but not downstream
   → inject is running outside an active scope
 
 ---

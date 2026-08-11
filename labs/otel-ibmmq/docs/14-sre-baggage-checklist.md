@@ -141,7 +141,7 @@ This is the zero-code path. The agent intercepts `MessageProducer.send` and
 - [ ] Same agent + exporter + service name configuration
 - [ ] Confirm `MessageListener.onMessage` or `MessageConsumer.receive` is used
       (both are instrumented; `receiveNoWait` is also covered)
-- [ ] Verify the span created by the agent carries `tenant.id` and other
+- [ ] Verify the span created by the agent carries `bsi.ep` and other
       baggage entries as span attributes (check in Tempo after first test)
 
 **If baggage entries are NOT automatically added as span attributes:**
@@ -465,12 +465,12 @@ through artifacts each team can produce.
 Ask each team to run:
 ```bash
 curl -X POST <entry-point-url> \
-  -H "X-Tenant-ID: sre-test" \
-  -H "X-User-ID: sre-probe"
+  -H "X-bsi-ep: sre-test" \
+  -H "X-bsi-ch: sre-probe"
 ```
 Then query Tempo / Jaeger with:
 ```
-{ resource.service.name =~ ".+" && span.tenant.id = "sre-test" }
+{ resource.service.name =~ ".+" && span.bsi.ep = "sre-test" }
 ```
 
 Expected: a **single trace** containing one span per service in the chain,
@@ -482,8 +482,8 @@ on an MQ hop) produces orphan spans with separate `trace-id`s.
 In the consumer (or any intermediate span), the following attributes must be
 present:
 ```
-tenant.id = "sre-test"
-user.id   = "sre-probe"
+bsi.ep = "sre-test"
+bsi.ch   = "sre-probe"
 ```
 
 If they are missing, the consumer is not reading baggage from context — it may

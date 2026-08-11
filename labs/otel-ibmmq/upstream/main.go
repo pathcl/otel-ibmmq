@@ -70,12 +70,12 @@ func initOtel(ctx context.Context, serviceName, collectorEndpoint string) (func(
 }
 
 // headerToBaggageKey derives the W3C Baggage key from an HTTP header name.
-// Go's net/http canonicalises header names (X-Tenant-ID → X-Tenant-Id), so
+// Go's net/http canonicalises header names (X-Bsi-Ep → X-Bsi-Ep), so
 // we strip "X-", lowercase, and replace "-" with ".":
 //
-//	X-Tenant-Id → tenant.id
-//	X-User-Id   → user.id
-//	X-Region-Id → region.id
+//	X-Bsi-Ep → bsi.ep
+//	X-Bsi-Ch → bsi.ch
+//	X-Bsi-Cj → bsi.cj
 func headerToBaggageKey(header string) string {
 	return strings.ToLower(strings.ReplaceAll(header[2:], "-", "."))
 }
@@ -93,7 +93,7 @@ func handleOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Collect all X-* headers. Go's HTTP server canonicalises header names, so
-	// X-Tenant-ID arrives as X-Tenant-Id and derives to tenant.id.
+	// X-Bsi-Ep arrives as X-Bsi-Ep and derives to bsi.ep.
 	attrs := map[string]string{}
 	for name, vals := range r.Header {
 		if strings.HasPrefix(name, "X-") && len(vals) > 0 {
@@ -101,16 +101,10 @@ func handleOrder(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	requiredKey := env("REQUIRED_BAGGAGE_KEY", "tenant.id")
+	requiredKey := env("REQUIRED_BAGGAGE_KEY", "bsi.ep")
 	if requiredKey != "" && attrs[requiredKey] == "" {
 		http.Error(w, requiredKey+" required (send X-"+strings.ToUpper(strings.ReplaceAll(requiredKey, ".", "-"))+" header)", http.StatusBadRequest)
 		return
-	}
-	tenantID := attrs["tenant.id"]
-	userID := attrs["user.id"]
-	if userID == "" {
-		userID = "anonymous"
-		attrs["user.id"] = userID
 	}
 
 	tracer := otel.Tracer("tutorial.upstream")
@@ -168,7 +162,7 @@ func handleOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(body)
 
-	log.Printf("upstream.order tenant=%-12s user=%-8s downstream=%d", tenantID, userID, resp.StatusCode)
+	log.Printf("upstream.order attrs=%v downstream=%d", attrs, resp.StatusCode)
 }
 
 func main() {

@@ -40,8 +40,8 @@ header() { echo; echo "━━ $* ━━"; }
 send_and_wait() {
     local tenant="$1" wait="${2:-20}"
     curl -s -X POST "${UPSTREAM_URL}/order" \
-        -H "X-Tenant-ID: ${tenant}" \
-        -H "X-User-ID: breaktest" > /dev/null
+        -H "X-bsi-ep: ${tenant}" \
+        -H "X-bsi-ch: breaktest" > /dev/null
     info "Sent message with tenant=${tenant}, waiting ${wait}s for pipeline..."
     sleep "${wait}"
 }
@@ -50,7 +50,7 @@ send_and_wait() {
 search_by_tenant() {
     local tenant="$1"
     curl -s -G "${TEMPO_URL}/api/search" \
-        --data-urlencode "q={ span.tenant.id = \"${tenant}\" }" \
+        --data-urlencode "q={ span.bsi.ep = \"${tenant}\" }" \
         --data-urlencode "limit=5" 2>/dev/null
 }
 
@@ -123,7 +123,7 @@ run_req1() {
     local count; count=$(echo "$search" | count_traces)
 
     if ((count == 0)); then
-        pass "REQ 1 BROKEN: No traces found for tenant ${tenant} — baggage was stripped, span.tenant.id never set downstream"
+        pass "REQ 1 BROKEN: No traces found for tenant ${tenant} — baggage was stripped, span.bsi.ep never set downstream"
     else
         local tid; tid=$(echo "$search" | first_trace_id)
         local trace; trace=$(fetch_trace "${tid}")
@@ -145,7 +145,7 @@ run_req1() {
 
 run_req4() {
     header "BREAK REQ 4 — Remove W3CBaggagePropagator from gateway OtelConfig"
-    info "Expected: traces still connected via traceparent, but span.tenant.id absent on all spans"
+    info "Expected: traces still connected via traceparent, but span.bsi.ep absent on all spans"
 
     local cfg="${JAVA_SRC}/gateway/src/main/java/tutorial/OtelConfig.java"
 
@@ -161,18 +161,18 @@ run_req4() {
     send_and_wait "${tenant}" 25
 
     # W3CBaggagePropagator missing → baggage not injected → validator/enricher/processor
-    # have no tenant.id (they read it only from extracted baggage, not from HTTP headers).
-    # The gateway span itself WILL have tenant.id (set explicitly via span.setAttribute)
+    # have no bsi.ep (they read it only from extracted baggage, not from HTTP headers).
+    # The gateway span itself WILL have bsi.ep (set explicitly via span.setAttribute)
     # so we must query a downstream service specifically.
     local search_validator; search_validator=$(curl -s -G "${TEMPO_URL}/api/search" \
-        --data-urlencode "q={ span.tenant.id = \"${tenant}\" && resource.service.name = \"validator\" }" \
+        --data-urlencode "q={ span.bsi.ep = \"${tenant}\" && resource.service.name = \"validator\" }" \
         --data-urlencode "limit=3" 2>/dev/null)
     local count_validator; count_validator=$(echo "$search_validator" | count_traces)
 
     if ((count_validator == 0)); then
-        pass "REQ 4 BROKEN: span.tenant.id absent on validator — baggage not propagated across MQ boundary"
+        pass "REQ 4 BROKEN: span.bsi.ep absent on validator — baggage not propagated across MQ boundary"
     else
-        fail "REQ 4: validator has span.tenant.id even without W3CBaggagePropagator — unexpected"
+        fail "REQ 4: validator has span.bsi.ep even without W3CBaggagePropagator — unexpected"
     fi
 
     # Verify the trace itself IS still connected (traceparent still works)
@@ -323,12 +323,12 @@ open('${src}', 'w').write(src)
     send_and_wait "${tenant}" 25
 
     # Tenant baggage IS in the message (gateway still injects), but validator doesn't extract it
-    # So validator.handle span won't have tenant.id attribute
+    # So validator.handle span won't have bsi.ep attribute
     local search; search=$(search_by_tenant "${tenant}")
     local count; count=$(echo "$search" | count_traces)
 
-    # The gateway span WILL have tenant.id (it sets it as span attribute explicitly)
-    # But validator onwards will NOT have tenant.id since baggage wasn't extracted
+    # The gateway span WILL have bsi.ep (it sets it as span attribute explicitly)
+    # But validator onwards will NOT have bsi.ep since baggage wasn't extracted
     local tid; tid=$(echo "$search" | first_trace_id)
     if [[ -z "$tid" ]]; then
         pass "REQ 7 BROKEN: No trace found by tenant — baggage context lost entirely"
@@ -374,9 +374,9 @@ open('${src}', 'w').write(src)
     local tenant="break-req8-$$"
     send_and_wait "${tenant}" 25
 
-    # Find the gateway trace specifically — it will always have tenant.id (set explicitly)
+    # Find the gateway trace specifically — it will always have bsi.ep (set explicitly)
     local gw_search; gw_search=$(curl -s -G "${TEMPO_URL}/api/search" \
-        --data-urlencode "q={ span.tenant.id = \"${tenant}\" && resource.service.name = \"gateway\" }" \
+        --data-urlencode "q={ span.bsi.ep = \"${tenant}\" && resource.service.name = \"gateway\" }" \
         --data-urlencode "limit=3" 2>/dev/null)
     local gw_tid; gw_tid=$(echo "$gw_search" | first_trace_id)
 

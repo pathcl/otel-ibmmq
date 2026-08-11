@@ -54,8 +54,8 @@ public class Validator {
             baggage.asMap().forEach((key, entry) -> consumerSpan.setAttribute(key, entry.getValue()));
 
             // The primary key drives required-field and denylist checks.
-            // Configurable via REQUIRED_BAGGAGE_KEY; defaults to tenant.id.
-            String requiredKey   = env("REQUIRED_BAGGAGE_KEY", "tenant.id");
+            // Configurable via REQUIRED_BAGGAGE_KEY; defaults to bsi.ep.
+            String requiredKey   = env("REQUIRED_BAGGAGE_KEY", "bsi.ep");
             String primaryValue  = requiredKey.isEmpty() ? null : baggage.getEntryValue(requiredKey);
 
             if (!requiredKey.isEmpty() && (primaryValue == null || primaryValue.isBlank())) {

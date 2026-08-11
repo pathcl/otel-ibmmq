@@ -211,7 +211,7 @@ wedge — browse the message on the queue before the consumer reads it.
 docker stop <validator-container>
 
 # Send a real message (use your gateway or JMS producer, not amqsput)
-curl -X POST http://localhost:8081/order -H "X-Tenant-ID: acme"
+curl -X POST http://localhost:8081/order -H "X-bsi-ep: acme"
 
 # Browse the queue — message is still sitting there
 docker exec <mq-container> /opt/mqm/samp/bin/amqsbcg DEV.QUEUE.1 QM1
@@ -226,7 +226,7 @@ docker start <validator-container>
 ```
 Format : 'MQHRF2  '
 ...
-<usr><traceparent>00-abc...</traceparent><baggage>tenant.id=acme</baggage></usr>
+<usr><traceparent>00-abc...</traceparent><baggage>bsi.ep=acme</baggage></usr>
 ```
 The producer injected correctly. IBM MQ is stripping MQRFH2 after PUT, before
 the consumer's MQGET. → Go to Step 3.
@@ -340,15 +340,15 @@ pulls the amd64 layer. No configuration change is required for either platform.
 ## What does the TraceQL syntax look like for querying by tenant? `#o11y`
 
 ```
-{ span.tenant.id = "acme" }
+{ span.bsi.ep = "checkout" }
 ```
 
 Unscoped (matches span or resource attributes):
 ```
-{ .tenant.id = "acme" }
+{ .bsi.ep = "checkout" }
 ```
 
-`span["tenant.id"]` is not valid TraceQL — it returns HTTP 400.
+`span["bsi.ep"]` is not valid TraceQL — it returns HTTP 400.
 
 ---
 

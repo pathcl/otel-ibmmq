@@ -10,7 +10,7 @@ W3C headers to the HTTP request. Gateway must read those headers, restore the
 OTel context they encode, and then:
 
 1. Start `gateway.send` as a **child** of `upstream.order` (trace continuity).
-2. Forward the original **baggage** (`tenant.id`, `user.id`) into IBM MQ
+2. Forward the original **baggage** (`bsi.ep`, `bsi.ch`) into IBM MQ
    without overwriting it.
 
 ---
@@ -29,7 +29,7 @@ over a `http.Header` map. The SDK writes two headers:
 
 ```
 traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
-baggage:     tenant.id=acme,user.id=user42
+baggage:     bsi.ep=acme,bsi.ch=user42
 ```
 
 Those headers arrive verbatim on the gateway's `HttpExchange`.
@@ -75,11 +75,11 @@ headers when gateway is the entry point (origin scenario):
 
 ```java
 Baggage upstreamBaggage = Baggage.fromContext(parentCtx);
-String tenantId = upstreamBaggage.getEntryValue("tenant.id");
-String userId   = upstreamBaggage.getEntryValue("user.id");
+String ep = upstreamBaggage.getEntryValue("bsi.ep");
+String ch   = upstreamBaggage.getEntryValue("bsi.ch");
 
-if (tenantId == null || tenantId.isBlank()) {
-    tenantId = exchange.getRequestHeaders().getFirst("X-Tenant-ID");
+if (ep == null || ep.isBlank()) {
+    ep = exchange.getRequestHeaders().getFirst("X-bsi-ep");
 }
 ```
 
@@ -87,12 +87,12 @@ if (tenantId == null || tenantId.isBlank()) {
 
 ```java
 Context ctx;
-if (upstreamBaggage.getEntryValue("tenant.id") != null) {
+if (upstreamBaggage.getEntryValue("bsi.ep") != null) {
     ctx = parentCtx;               // middle: forward upstream baggage unchanged
 } else {
     ctx = Baggage.builder()
-        .put("tenant.id", tenantId)
-        .put("user.id", userId)
+        .put("bsi.ep", ep)
+        .put("bsi.ch", ch)
         .build()
         .storeInContext(parentCtx); // origin: create fresh baggage from headers
 }
@@ -119,7 +119,7 @@ otel.getPropagators().getTextMapPropagator()
 
 `Context.current()` now includes the active `gateway.send` span, so
 `traceparent` in the JMS message points to `gateway.send`. The baggage
-(`tenant.id`, `user.id`) is forwarded unchanged, making it available to
+(`bsi.ep`, `bsi.ch`) is forwarded unchanged, making it available to
 validator, enricher, and processor.
 
 ---
@@ -132,13 +132,13 @@ upstream/main.go
       │
       │  HTTP headers
       │    traceparent: 00-<trace-id>-<upstream-span-id>-01
-      │    baggage:     tenant.id=acme,user.id=user42
+      │    baggage:     bsi.ep=acme,bsi.ch=user42
       ▼
 Gateway.java handle()
   TextMapGetter reads HttpExchange headers
   .extract() → parentCtx
       ├─ parent span  = upstream.order
-      └─ baggage      = {tenant.id=acme, user.id=user42}
+      └─ baggage      = {bsi.ep=acme, bsi.ch=user42}
                 │
                 ▼  .setParent(ctx)
           gateway.send  (child of upstream.order, same trace-id)
@@ -146,7 +146,7 @@ Gateway.java handle()
                 ▼  JmsCarrier.SETTER
           JMS message properties
               traceparent → gateway.send span
-              baggage     → tenant.id=acme,user.id=user42
+              baggage     → bsi.ep=acme,bsi.ch=user42
                 │
                 ▼
   validator → enricher → processor  (same trace, same baggage)

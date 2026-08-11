@@ -38,7 +38,7 @@ public class Gateway {
 
     // Derives the W3C Baggage key from an HTTP header name.
     // Strips the leading "x-" or "X-" prefix, lowercases everything, and
-    // replaces "-" with "." so that X-Tenant-ID becomes tenant.id.
+    // replaces "-" with "." so that X-Bsi-Ep becomes bsi.ep.
     private static String headerToBaggageKey(String header) {
         return header.substring(2).toLowerCase().replace('-', '.');
     }
@@ -75,8 +75,8 @@ public class Gateway {
         });
 
         // Optional required key — configurable via REQUIRED_BAGGAGE_KEY env var.
-        // Default is tenant.id; set to empty string to accept any non-empty X-* set.
-        String requiredKey = env("REQUIRED_BAGGAGE_KEY", "tenant.id");
+        // Default is bsi.ep; set to empty string to accept any non-empty X-* set.
+        String requiredKey = env("REQUIRED_BAGGAGE_KEY", "bsi.ep");
         if (!requiredKey.isEmpty() && (!values.containsKey(requiredKey) || values.get(requiredKey).isBlank())) {
             byte[] msg = (requiredKey + " required (send X-" + requiredKey.replace('.', '-').toUpperCase() + " header)\n").getBytes();
             exchange.sendResponseHeaders(400, msg.length);

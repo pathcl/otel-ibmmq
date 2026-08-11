@@ -869,7 +869,7 @@ properties / MQRFH2 `<usr>` entries):
 
 ```java
 MessageConsumer consumer = session.createConsumer(queue,
-    "tenant_id = 'acme' AND priority > 5");
+    "bsi_ep = 'acme' AND priority > 5");
 ```
 
 IBM MQ evaluates the selector server-side using MQRFH2 properties. Mis-matched

@@ -7,8 +7,8 @@ passed explicitly as a parameter. Good candidates:
 
 | Key        | Why baggage                                         |
 |------------|-----------------------------------------------------|
-| `tenant.id` | Every service needs it for isolation and filtering  |
-| `user.id`   | Useful for user-level debugging across services     |
+| `bsi.ep` | Every service needs it for isolation and filtering  |
+| `bsi.ch`   | Useful for user-level debugging across services     |
 
 ## What does NOT belong in baggage
 
@@ -34,25 +34,25 @@ do not. This is why both are needed:
 
 ## OTel metric label naming
 
-The OTel SDK uses `tenant.id` (dot notation) as the attribute key:
+The OTel SDK uses `bsi.ep` (dot notation) as the attribute key:
 
 ```java
 messagesProcessed.add(1, Attributes.builder()
-    .put("tenant.id", tenantId)
+    .put("bsi.ep", ep)
     .build()
 );
 ```
 
-The OTel collector's Prometheus exporter converts this to `tenant_id` (underscore).
-The Prometheus metric becomes `messages_processed_total{tenant_id="acme"}`.
+The OTel collector's Prometheus exporter converts this to `bsi_ep` (underscore).
+The Prometheus metric becomes `messages_processed_total{bsi_ep="checkout"}`.
 
-The Grafana dashboard query uses `tenant_id` (underscore) to match:
+The Grafana dashboard query uses `bsi_ep` (underscore) to match:
 
 ```promql
 increase(messages_processed_total[$__rate_interval])
 ```
 
-with legend `tenant={{ tenant_id }}`.
+with legend `tenant={{ bsi_ep }}`.
 
 ## Future: additional dimensions
 

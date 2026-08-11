@@ -20,7 +20,7 @@ gateway         SERVICE_NAME=gateway
     ▼
 validator       SERVICE_NAME=validator
     │  CONSUMER ← DEV.QUEUE.1
-    │  checks tenant.id is present and not in blocklist
+    │  checks bsi.ep is present and not in blocklist
     ├── valid   → PRODUCER → DEV.QUEUE.2
     └── invalid → PRODUCER → DEV.DEAD.LETTER.QUEUE  (see 08-dlq-pattern.md)
     ▼
@@ -114,7 +114,7 @@ Open any trace in Tempo → expand the `enricher.handle` span → these appear u
 # Valid pipeline messages
 for tenant in acme beta gamma; do
   curl -X POST http://localhost:8080/send \
-    -H "X-Tenant-ID: $tenant" -H "X-User-ID: user1"
+    -H "X-bsi-ep: $tenant" -H "X-bsi-ch: user1"
 done
 ```
 

@@ -111,7 +111,7 @@ downstream. Each crossing is an independent drop point.
 - [ ] **[decision]** Identify which API each service uses: JMS or native MQI
   - JMS (Java/Jakarta): auto-instrumentation available — skip to section 4, configure propagator only
   - Native MQI (Go, Python, Node.js, .NET, C): manual carrier required — follow all sections
-- [ ] **[decision]** Agree on baggage keys and their semantics (e.g. `tenant.id`, `request.id`)
+- [ ] **[decision]** Agree on baggage keys and their semantics (e.g. `bsi.ep`, `request.id`)
   - Keys must be lowercase, no spaces (W3C Baggage spec)
   - Decide which service is the **authority** that sets each key (usually the entry point)
 - [ ] **[decision]** Confirm MQRFH2 is enabled on all relevant queues
@@ -171,7 +171,7 @@ downstream. Each crossing is an independent drop point.
   ```go
   // Go — gateway reading tenant from HTTP header
   b := baggage.New()
-  m, _ := baggage.NewMember("tenant.id", r.Header.Get("X-Tenant-ID"))
+  m, _ := baggage.NewMember("bsi.ep", r.Header.Get("X-bsi-ep"))
   b, _ = b.SetMember(m)
   ctx = baggage.ContextWithBaggage(ctx, b)
   ```
@@ -183,7 +183,7 @@ downstream. Each crossing is an independent drop point.
   ```go
   // Go — works the same whether you set the baggage or received it from upstream
   b := baggage.FromContext(ctx)
-  span.SetAttributes(attribute.String("tenant.id", b.Member("tenant.id").Value()))
+  span.SetAttributes(attribute.String("bsi.ep", b.Member("bsi.ep").Value()))
   ```
 
 ---
@@ -226,7 +226,7 @@ downstream. Each crossing is an independent drop point.
 
   ```go
   b := baggage.FromContext(ctx)
-  span.SetAttributes(attribute.String("tenant.id", b.Member("tenant.id").Value()))
+  span.SetAttributes(attribute.String("bsi.ep", b.Member("bsi.ep").Value()))
   ```
 
 - [ ] Pass the enriched `ctx` to all downstream logic in this service — do not discard it
@@ -284,7 +284,7 @@ downstream. Each crossing is an independent drop point.
   - Open the same trace ID in your observability backend — confirm your MQ spans appear as children within that trace, not as a separate root trace
 
 - [ ] **Baggage pass-through test**
-  - Confirm a baggage key set upstream (e.g. `tenant.id`) arrives as a span attribute in your MQ services without being modified
+  - Confirm a baggage key set upstream (e.g. `bsi.ep`) arrives as a span attribute in your MQ services without being modified
   - If the key is missing: check whether upstream propagates Baggage at all (Section 0a) — it may only propagate TraceContext
 
 - [ ] **Outbound bridge test (if MQ feeds a downstream system)**

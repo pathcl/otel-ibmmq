@@ -36,7 +36,7 @@ scripts across containers. The SDK approach is self-contained in the application
 
 **4. Explicit metric definition**
 The agent can auto-create messaging metrics (message count, duration) but with fixed
-attribute names. The SDK lets us define `messages.processed` with a `tenant.id`
+attribute names. The SDK lets us define `messages.processed` with a `bsi.ep`
 attribute that maps directly to our Grafana dashboard.
 
 ### When to use the agent instead

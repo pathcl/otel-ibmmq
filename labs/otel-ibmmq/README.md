@@ -57,11 +57,11 @@ retry automatically.
 
 ```bash
 curl -X POST http://localhost:8081/order \
-  -H "X-Tenant-ID: acme" \
-  -H "X-User-ID: user42"
+  -H "X-bsi-ep: acme" \
+  -H "X-bsi-ch: user42"
 ```
 
-The upstream service creates the root span, sets `tenant.id`/`user.id` baggage,
+The upstream service creates the root span, sets `bsi.ep`/`bsi.ch` baggage,
 injects W3C headers (`traceparent`, `baggage`) into its HTTP call to gateway,
 and gateway forwards them unchanged into IBM MQ.
 
@@ -69,8 +69,8 @@ and gateway forwards them unchanged into IBM MQ.
 
 ```bash
 curl -X POST http://localhost:8080/send \
-  -H "X-Tenant-ID: acme" \
-  -H "X-User-ID: user42"
+  -H "X-bsi-ep: acme" \
+  -H "X-bsi-ch: user42"
 ```
 
 Send a few messages with different tenant IDs (traffic-gen does this automatically
@@ -79,8 +79,8 @@ once running, but manual sends give you control over timing):
 ```bash
 for tenant in acme globex initech; do
   curl -s -X POST http://localhost:8081/order \
-    -H "X-Tenant-ID: $tenant" \
-    -H "X-User-ID: user1"
+    -H "X-bsi-ep: $tenant" \
+    -H "X-bsi-ch: user1"
   echo "$tenant: sent"
 done
 ```
@@ -91,14 +91,14 @@ done
 |-----|--------------|
 | http://localhost:3000 | Grafana — `otel-mq-app` Scenes plugin (service graph, tenant debug) |
 | http://localhost:3001 | Grafana — "OTel IBM MQ Baggage Lab" dashboard |
-| http://localhost:3001/explore | Tempo trace search — filter by `tenant.id` |
+| http://localhost:3001/explore | Tempo trace search — filter by `bsi.ep` |
 | http://localhost:9090 | Prometheus — query `traces_service_graph_request_total` |
 | https://localhost:9443 | IBM MQ web console (`admin` / `passw0rd`) |
 
 **Trace search** — in Grafana Explore → Tempo, use TraceQL:
 
 ```
-{ span.tenant.id = "acme" }
+{ span.bsi.ep = "checkout" }
 ```
 
 **Middle scenario** trace shape:

@@ -81,7 +81,7 @@ Format : 'MQHRF2  '
 ...
 <usr>
   <traceparent>00-...</traceparent>
-  <baggage>tenant.id=acme,user.id=user42</baggage>
+  <baggage>bsi.ep=acme,bsi.ch=user42</baggage>
 </usr>
 ```
 
@@ -142,15 +142,15 @@ TEMPO_URL="http://<tempo-host>:3200"
 
 # Send
 curl -s -X POST "${GATEWAY_URL}/send" \
-  -H "X-Tenant-ID: ${TENANT}" \
-  -H "X-User-ID: healthcheck"
+  -H "X-bsi-ep: ${TENANT}" \
+  -H "X-bsi-ch: healthcheck"
 
 # Wait for spans to flush (adjust to your batch export interval)
 sleep 15
 
 # Query Tempo
 curl -s -G "${TEMPO_URL}/api/search" \
-  --data-urlencode "q={ span.tenant.id = \"${TENANT}\" }" \
+  --data-urlencode "q={ span.bsi.ep = \"${TENANT}\" }" \
   --data-urlencode "limit=5"
 ```
 
@@ -163,7 +163,7 @@ import sys, json, urllib.request, urllib.parse
 tenant  = sys.argv[1]
 tempo   = sys.argv[2]
 
-q  = urllib.parse.urlencode({"q": f'{{ span.tenant.id = "{tenant}" }}', "limit": "5"})
+q  = urllib.parse.urlencode({"q": f'{{ span.bsi.ep = "{tenant}" }}', "limit": "5"})
 r  = urllib.request.urlopen(f"{tempo}/api/search?{q}")
 data = json.loads(r.read())
 
@@ -228,6 +228,6 @@ grep -rE "W3CBaggagePropagator|W3CTraceContextPropagator|TextMapSetter|TextMapGe
 
 # Tempo query by tenant
 curl -s -G http://<tempo>:3200/api/search \
-  --data-urlencode 'q={ span.tenant.id = "<tenant>" }' \
+  --data-urlencode 'q={ span.bsi.ep = "<tenant>" }' \
   --data-urlencode "limit=5"
 ```

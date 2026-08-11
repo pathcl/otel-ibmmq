@@ -61,8 +61,8 @@ This is why the processor explicitly copies baggage values to span attributes:
 
 ```java
 Baggage baggage = Baggage.fromContext(extractedCtx);
-span.setAttribute("tenant.id", baggage.getEntryValue("tenant.id"));
+span.setAttribute("bsi.ep", baggage.getEntryValue("bsi.ep"));
 ```
 
-If you skip this step, `tenant.id` travels through the system but disappears —
+If you skip this step, `bsi.ep` travels through the system but disappears —
 it never lands in Tempo and you cannot filter traces by it.

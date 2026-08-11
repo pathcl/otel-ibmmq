@@ -213,8 +213,8 @@ docker stop <validator-container-id>
 
 # 2. Send a message through the upstream → gateway pipeline
 curl -X POST http://localhost:8081/order \
-  -H "X-Tenant-ID: acme" \
-  -H "X-User-ID: user42"
+  -H "X-bsi-ep: acme" \
+  -H "X-bsi-ch: user42"
 
 # 3. Browse the queue — message is sitting there, nobody consuming it
 docker exec <mq-container-id> /opt/mqm/samp/bin/amqsbcg DEV.QUEUE.1 QM1
@@ -250,8 +250,8 @@ Compare this with the `amqsput` output from Chapter 1:
 
 00000000:  5246 4820 ...                        'RFH ......'   ← MQRFH2 header starts here
 000000A0:  3C75 7372 3E3C 6261 6767 6167 653E   '<usr><baggage>'
-000000B0:  74 65 6E61 6E74 2E69 643D 6163 6D65  'tenant.id=acme,'
-000000C0:  2C75 7365 722E 6964 3D75 7365 7234 32 'user.id=user42'
+000000B0:  74 65 6E61 6E74 2E69 643D 6163 6D65  'bsi.ep=acme,'
+000000C0:  2C75 7365 722E 6964 3D75 7365 7234 32 'bsi.ch=user42'
 000000D0:  3C2F 6261 6767 6167 653E             '</baggage>'
 000000D0:  3C74 7261 6365 7061 7265 6E74 3E     '<traceparent>'
 000000E0:  3030 2D35 3235 3261 6264 3862 3835   '00-5252abd8b85'
@@ -303,7 +303,7 @@ Take the trace ID from the `<traceparent>` field you saw in `amqsbcg`. Go to
 Grafana Explore → Tempo and query:
 
 ```
-{ span.tenant.id = "acme" }
+{ span.bsi.ep = "checkout" }
 ```
 
 You will find the trace. The span tree will show:
@@ -392,8 +392,8 @@ Send a message through the pipeline:
 
 ```bash
 curl -X POST http://localhost:8081/order \
-  -H "X-Tenant-ID: acme" \
-  -H "X-User-ID: user42"
+  -H "X-bsi-ep: acme" \
+  -H "X-bsi-ch: user42"
 ```
 
 Go to Tempo. Search for the trace. You will find two disconnected traces instead
@@ -454,7 +454,7 @@ You see:
 ```
 <usr>
   traceparent : '00-9a3c2f1b4d8e7a6c5b2f0d1e3c9a7b4f-01a2b3c4d5e6f7a8-01'
-  baggage     : 'tenant.id=globex,user.id=user91,order.type=high-value'
+  baggage     : 'bsi.ep=globex,bsi.ch=user91,order.type=high-value'
 </usr>
 ```
 

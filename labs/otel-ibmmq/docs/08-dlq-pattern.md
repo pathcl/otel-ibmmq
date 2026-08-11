@@ -14,7 +14,7 @@ the failure explicit and inspectable.
 
 ```
 validator
-    │  message fails validation (tenant.id missing or in blocklist)
+    │  message fails validation (bsi.ep missing or in blocklist)
     │  PRODUCER → DEV.DEAD.LETTER.QUEUE  (IBM MQ Docker default queue)
     ▼
 dlq-handler     SERVICE_NAME=dlq-handler
@@ -32,9 +32,9 @@ No additional MQ configuration is needed.
 ```bash
 # "bad-tenant" is in the validator's BLOCKED_TENANTS set
 curl -X POST http://localhost:8080/send \
-  -H "X-Tenant-ID: bad-tenant" -H "X-User-ID: tester"
+  -H "X-bsi-ep: bad-tenant" -H "X-bsi-ch: tester"
 
-# Missing tenant.id also routes to DLQ (but gateway currently requires the header —
+# Missing bsi.ep also routes to DLQ (but gateway currently requires the header —
 # remove the 400 check in Gateway.java to test this path end-to-end)
 ```
 
@@ -66,7 +66,7 @@ span.setStatus(StatusCode.ERROR, reason);
 span.recordException(new RuntimeException("DLQ: " + reason));  // appears in Tempo trace
 
 rejectedCounter.add(1, Attributes.builder()
-    .put("tenant.id",  tenantId)
+    .put("bsi.ep",  ep)
     .put("dlq.reason", reason)
     .build());
 ```
@@ -84,11 +84,11 @@ visible under "Events" in Tempo's trace view.
 
 ## Metrics
 
-`dlq-handler` emits `messages.rejected_total` with labels `tenant.id` and `dlq.reason`.
+`dlq-handler` emits `messages.rejected_total` with labels `bsi.ep` and `dlq.reason`.
 Query in Prometheus:
 
 ```promql
-sum by (tenant_id, dlq_reason) (increase(messages_rejected_total[1h]))
+sum by (bsi_ep, dlq_reason) (increase(messages_rejected_total[1h]))
 ```
 
 ## What a production DLQ handler does

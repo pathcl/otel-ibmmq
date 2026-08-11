@@ -33,7 +33,7 @@ wait_for_trace() {
     local tenant="$1" attempts=10
     while ((attempts-- > 0)); do
         local result
-        result=$(curl -s "${TEMPO_URL}/api/search?q=%7B+span.tenant.id+%3D+%22${tenant}%22+%7D&limit=5")
+        result=$(curl -s "${TEMPO_URL}/api/search?q=%7B+span.bsi.ep+%3D+%22${tenant}%22+%7D&limit=5")
         local count
         count=$(echo "$result" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('traces',[])))" 2>/dev/null || echo 0)
         if ((count > 0)); then
@@ -85,8 +85,8 @@ docker stop "${VALIDATOR_CONTAINER}" > /dev/null 2>&1
 
 BREAK_TENANT="propctl-break-test-$$"
 curl -s -X POST "${UPSTREAM_URL}/order" \
-    -H "X-Tenant-ID: ${BREAK_TENANT}" \
-    -H "X-User-ID: test" > /dev/null
+    -H "X-bsi-ep: ${BREAK_TENANT}" \
+    -H "X-bsi-ch: test" > /dev/null
 
 sleep 1
 BCG_OUT=$(${MQ_BIN}/amqsbcg DEV.QUEUE.1 QM1 2>/dev/null)
@@ -145,8 +145,8 @@ docker stop "${VALIDATOR_CONTAINER}" > /dev/null 2>&1
 sleep 1
 
 curl -s -X POST "${UPSTREAM_URL}/order" \
-    -H "X-Tenant-ID: format-test" \
-    -H "X-User-ID: test" > /dev/null
+    -H "X-bsi-ep: format-test" \
+    -H "X-bsi-ch: test" > /dev/null
 sleep 1
 
 FORMAT_OUT=$(${MQ_BIN}/amqsbcg DEV.QUEUE.1 QM1 2>/dev/null)
@@ -192,15 +192,15 @@ header "REQ 4 RUNTIME — Baggage reaches Tempo as span attributes"
 
 RUNTIME_TENANT="req4test$$"
 curl -s -X POST "${UPSTREAM_URL}/order" \
-    -H "X-Tenant-ID: ${RUNTIME_TENANT}" \
-    -H "X-User-ID: test" > /dev/null
+    -H "X-bsi-ep: ${RUNTIME_TENANT}" \
+    -H "X-bsi-ch: test" > /dev/null
 
 info "Waiting for trace to appear in Tempo (up to 30s)..."
 SEARCH=""
 for i in $(seq 1 6); do
     sleep 5
     SEARCH=$(curl -s -G "${TEMPO_URL}/api/search" \
-        --data-urlencode "q={ span.tenant.id = \"${RUNTIME_TENANT}\" }" \
+        --data-urlencode "q={ span.bsi.ep = \"${RUNTIME_TENANT}\" }" \
         --data-urlencode "limit=3" 2>/dev/null)
     COUNT_TMP=$(echo "$SEARCH" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('traces',[])))" 2>/dev/null || echo 0)
     ((COUNT_TMP > 0)) && break
@@ -208,7 +208,7 @@ done
 COUNT=$(echo "$SEARCH" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('traces',[])))" 2>/dev/null || echo 0)
 
 if ((COUNT > 0)); then
-    pass "Tenant baggage '${RUNTIME_TENANT}' found as span.tenant.id in Tempo — W3CBaggagePropagator working"
+    pass "Tenant baggage '${RUNTIME_TENANT}' found as span.bsi.ep in Tempo — W3CBaggagePropagator working"
 else
     fail "Tenant baggage '${RUNTIME_TENANT}' NOT found in Tempo — W3CBaggagePropagator may be broken"
 fi
@@ -319,15 +319,15 @@ header "REQ 8 RUNTIME — End-to-end connected trace in Tempo"
 
 CONNECTED_TENANT="conntest$$"
 curl -s -X POST "${UPSTREAM_URL}/order" \
-    -H "X-Tenant-ID: ${CONNECTED_TENANT}" \
-    -H "X-User-ID: test" > /dev/null
+    -H "X-bsi-ep: ${CONNECTED_TENANT}" \
+    -H "X-bsi-ch: test" > /dev/null
 
 info "Waiting for full pipeline to complete (up to 30s)..."
 SEARCH=""
 for i in $(seq 1 6); do
     sleep 5
     SEARCH=$(curl -s -G "${TEMPO_URL}/api/search" \
-        --data-urlencode "q={ span.tenant.id = \"${CONNECTED_TENANT}\" }" \
+        --data-urlencode "q={ span.bsi.ep = \"${CONNECTED_TENANT}\" }" \
         --data-urlencode "limit=1" 2>/dev/null)
     COUNT_TMP=$(echo "$SEARCH" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('traces',[])))" 2>/dev/null || echo 0)
     ((COUNT_TMP > 0)) && break

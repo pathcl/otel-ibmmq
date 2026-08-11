@@ -16,7 +16,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "increase(messages_processed_total[$__rate_interval])",
-          "legendFormat": "tenant={{ tenant_id }}"
+          "legendFormat": "tenant={{ bsi_ep }}"
         }
       ]
     },
@@ -44,7 +44,7 @@
         {
           "datasource": { "type": "tempo", "uid": "tempo" },
           "queryType": "traceql",
-          "query": "{span[\"tenant.id\"] != \"\"}",
+          "query": "{span[\"bsi.ep\"] != \"\"}",
           "refId": "A",
           "limit": 20
         }
