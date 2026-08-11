@@ -117,7 +117,7 @@ MQ has a system-level DLQ. Messages go there when: the destination queue is full
 message expired, or the application explicitly rejects it. A DLQ handler inspects failed
 messages and either retries, alerts, or archives them.
 
-**Implemented in this lab:** `validator` rejects `bad-tenant` / `blocked` tenants to
+**Implemented in this lab:** `validator` rejects messages with `bsi.cj` in `BLOCKED_CJS` (`bad-cj`, `blocked`) to
 `DEV.DEAD.LETTER.QUEUE`; `dlq-handler` consumes and marks spans ERROR.
 
 ---

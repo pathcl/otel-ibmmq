@@ -30,10 +30,10 @@ info() { echo "  · $*"; }
 header() { echo; echo "━━ $* ━━"; }
 
 wait_for_trace() {
-    local tenant="$1" attempts=10
+    local ep="$1" attempts=10
     while ((attempts-- > 0)); do
         local result
-        result=$(curl -s "${TEMPO_URL}/api/search?q=%7B+span.bsi.ep+%3D+%22${tenant}%22+%7D&limit=5")
+        result=$(curl -s "${TEMPO_URL}/api/search?q=%7B+span.bsi.ep+%3D+%22${ep}%22+%7D&limit=5")
         local count
         count=$(echo "$result" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('traces',[])))" 2>/dev/null || echo 0)
         if ((count > 0)); then
@@ -317,9 +317,9 @@ done
 
 header "REQ 8 RUNTIME — End-to-end connected trace in Tempo"
 
-CONNECTED_TENANT="conntest$$"
+CONNECTED_EP="conntest$$"
 curl -s -X POST "${UPSTREAM_URL}/order" \
-    -H "X-bsi-ep: ${CONNECTED_TENANT}" \
+    -H "X-bsi-ep: ${CONNECTED_EP}" \
     -H "X-bsi-ch: test" > /dev/null
 
 info "Waiting for full pipeline to complete (up to 30s)..."
@@ -327,7 +327,7 @@ SEARCH=""
 for i in $(seq 1 6); do
     sleep 5
     SEARCH=$(curl -s -G "${TEMPO_URL}/api/search" \
-        --data-urlencode "q={ span.bsi.ep = \"${CONNECTED_TENANT}\" }" \
+        --data-urlencode "q={ span.bsi.ep = \"${CONNECTED_EP}\" }" \
         --data-urlencode "limit=1" 2>/dev/null)
     COUNT_TMP=$(echo "$SEARCH" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('traces',[])))" 2>/dev/null || echo 0)
     ((COUNT_TMP > 0)) && break
@@ -335,7 +335,7 @@ done
 TRACE_ID=$(echo "$SEARCH" | python3 -c "import sys,json; traces=json.load(sys.stdin).get('traces',[]); print(traces[0]['traceID'] if traces else '')" 2>/dev/null || echo "")
 
 if [[ -z "$TRACE_ID" ]]; then
-    fail "No trace found for tenant ${CONNECTED_TENANT} — pipeline may not be processing"
+    fail "No trace found for ep=${CONNECTED_EP} — pipeline may not be processing"
 else
     info "Trace ID: ${TRACE_ID}"
     TRACE=$(get_trace_spans "$TRACE_ID")

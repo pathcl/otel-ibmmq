@@ -30,9 +30,9 @@ No additional MQ configuration is needed.
 ## How to trigger it
 
 ```bash
-# "bad-tenant" is in the validator's BLOCKED_TENANTS set
+# "bad-cj" is in the validator's BLOCKED_CJS set (checked against bsi.cj)
 curl -X POST http://localhost:8080/send \
-  -H "X-bsi-ep: bad-tenant" -H "X-bsi-ch: tester"
+  -H "X-bsi-ep: account" -H "X-bsi-ch: tester" -H "X-bsi-cj: bad-cj"
 
 # Missing bsi.ep also routes to DLQ (but gateway currently requires the header —
 # remove the 400 check in Gateway.java to test this path end-to-end)
@@ -45,7 +45,7 @@ received it and a PRODUCER span that sends it to the DLQ. Both are marked ERROR.
 
 ```java
 // In Validator.reject():
-consumerSpan.setStatus(StatusCode.ERROR, reason);   // "tenant blocked: bad-tenant"
+consumerSpan.setStatus(StatusCode.ERROR, reason);   // "bsi.cj blocked: bad-cj"
 
 Span producerSpan = tracer.spanBuilder("validator.reject")
     .setSpanKind(SpanKind.PRODUCER)
@@ -75,7 +75,7 @@ rejectedCounter.add(1, Attributes.builder()
 
 A rejected trace has:
 1. `gateway.send` span (PRODUCER, OK)
-2. `validator.handle` span (CONSUMER, **ERROR** — "tenant blocked: bad-tenant")
+2. `validator.handle` span (CONSUMER, **ERROR** — "bsi.cj blocked: bad-cj")
 3. `validator.reject` span (PRODUCER, **ERROR**)
 4. `dlq-handler.handle` span (CONSUMER, **ERROR** + recorded exception)
 

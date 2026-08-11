@@ -36,9 +36,9 @@ var pool = []msg{
 	{ep: "account", ch: "ios", cj: "CardActivation"},
 	{ep: "account", ch: "web", cj: "MoneyTransfer"},
 	{ep: "account", ch: "ios", cj: "AccountOpen"},
-	{ep: "blocked", ch: "android", cj: "MoneyTransfer"},  // → DLQ
-	{ep: "bad-tenant", ch: "web", cj: "AccountOpen"},     // → DLQ
-	{ep: "blocked", ch: "ios", cj: "CardActivation"},     // → DLQ
+	{ep: "checkout", ch: "android", cj: "blocked"},  // → DLQ
+	{ep: "account",  ch: "web",     cj: "bad-cj"},   // → DLQ
+	{ep: "payment",  ch: "ios",     cj: "blocked"},  // → DLQ
 }
 
 func main() {

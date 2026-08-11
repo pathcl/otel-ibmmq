@@ -25,7 +25,7 @@ One producer span fans out to N consumer spans, all children of the same parent.
 The audit copy is a side-effect of the main flow, not a continuation of it. Use a span link (same as Request-Reply). Parent-child would place the audit span inline in the pipeline, distorting latency attribution.
 
 **Impact on this lab**
-The lab uses Pipeline, DLQ, and Competing Consumers. The most important fix is the DLQ path: `validator` must propagate the original context when putting rejected messages to `DEV.DEAD.LETTER.QUEUE`, so that `bad-tenant` and `blocked` traces appear as a single connected trace rather than two disconnected fragments.
+The lab uses Pipeline, DLQ, and Competing Consumers. The most important fix is the DLQ path: `validator` must propagate the original context when putting rejected messages to `DEV.DEAD.LETTER.QUEUE`, so that `bad-cj` and `blocked` traces appear as a single connected trace rather than two disconnected fragments.
 
 ---
 

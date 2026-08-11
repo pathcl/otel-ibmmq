@@ -7,7 +7,7 @@
 # Each test:
 #   1. Patches the source file
 #   2. Rebuilds just that service
-#   3. Sends a unique-tenant message
+#   3. Sends a unique-ep message
 #   4. Queries Tempo to verify the expected failure
 #   5. Restores source and rebuilds
 #
@@ -38,19 +38,19 @@ header() { echo; echo "━━ $* ━━"; }
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 send_and_wait() {
-    local tenant="$1" wait="${2:-20}"
+    local ep="$1" wait="${2:-20}"
     curl -s -X POST "${UPSTREAM_URL}/order" \
-        -H "X-bsi-ep: ${tenant}" \
+        -H "X-bsi-ep: ${ep}" \
         -H "X-bsi-ch: breaktest" > /dev/null
-    info "Sent message with tenant=${tenant}, waiting ${wait}s for pipeline..."
+    info "Sent message with ep=${ep}, waiting ${wait}s for pipeline..."
     sleep "${wait}"
 }
 
-# Returns JSON search result for a tenant's traces
-search_by_tenant() {
-    local tenant="$1"
+# Returns JSON search result for traces by bsi.ep value
+search_by_ep() {
+    local ep="$1"
     curl -s -G "${TEMPO_URL}/api/search" \
-        --data-urlencode "q={ span.bsi.ep = \"${tenant}\" }" \
+        --data-urlencode "q={ span.bsi.ep = \"${ep}\" }" \
         --data-urlencode "limit=5" 2>/dev/null
 }
 
@@ -117,20 +117,20 @@ run_req1() {
     mqsc "ALTER QLOCAL(DEV.QUEUE.1) PROPCTL(NONE)" > /dev/null
     sleep 2   # let the queue manager propagate the PROPCTL change before the next MQPUT
 
-    local tenant="break-req1-$$"
-    send_and_wait "${tenant}" 15
+    local ep="break-req1-$$"
+    send_and_wait "${ep}" 15
 
     # Gateway always sets span.bsi.ep from the HTTP header, so a trace will exist
     # even when PROPCTL(NONE) strips the MQ message. The correct check is whether
     # the validator appears in the gateway trace — if PROPCTL(NONE) stripped the
     # MQRFH2, the validator creates an orphan trace and is absent from the gateway trace.
     local gw_search; gw_search=$(curl -s -G "${TEMPO_URL}/api/search" \
-        --data-urlencode "q={ span.bsi.ep = \"${tenant}\" && resource.service.name = \"gateway\" }" \
+        --data-urlencode "q={ span.bsi.ep = \"${ep}\" && resource.service.name = \"gateway\" }" \
         --data-urlencode "limit=3" 2>/dev/null)
     local gw_tid; gw_tid=$(echo "$gw_search" | first_trace_id)
 
     if [[ -z "$gw_tid" ]]; then
-        pass "REQ 1 BROKEN: No gateway trace found for bsi.ep=${tenant} — unexpected but baggage certainly lost"
+        pass "REQ 1 BROKEN: No gateway trace found for bsi.ep=${ep} — unexpected but baggage certainly lost"
     else
         local trace; trace=$(fetch_trace "${gw_tid}")
         local svcs; svcs=$(echo "$trace" | count_services | tail -1)
@@ -162,15 +162,15 @@ run_req4() {
     info "Patched OtelConfig.java — W3CBaggagePropagator removed from gateway"
     rebuild_and_restart "gateway"
 
-    local tenant="break-req4-$$"
-    send_and_wait "${tenant}" 25
+    local ep="break-req4-$$"
+    send_and_wait "${ep}" 25
 
     # W3CBaggagePropagator missing → baggage not injected → validator/enricher/processor
     # have no bsi.ep (they read it only from extracted baggage, not from HTTP headers).
     # The gateway span itself WILL have bsi.ep (set explicitly via span.setAttribute)
     # so we must query a downstream service specifically.
     local search_validator; search_validator=$(curl -s -G "${TEMPO_URL}/api/search" \
-        --data-urlencode "q={ span.bsi.ep = \"${tenant}\" && resource.service.name = \"validator\" }" \
+        --data-urlencode "q={ span.bsi.ep = \"${ep}\" && resource.service.name = \"validator\" }" \
         --data-urlencode "limit=3" 2>/dev/null)
     local count_validator; count_validator=$(echo "$search_validator" | count_traces)
 
@@ -227,10 +227,10 @@ open('${carrier}', 'w').write(src)
     info "Patched JmsCarrier.java — SETTER writes nothing"
     rebuild_and_restart "gateway"
 
-    local tenant="break-req5-$$"
-    send_and_wait "${tenant}" 25
+    local ep="break-req5-$$"
+    send_and_wait "${ep}" 25
 
-    local search; search=$(search_by_tenant "${tenant}")
+    local search; search=$(search_by_ep "${ep}")
     local count; count=$(echo "$search" | count_traces)
 
     local tid; tid=$(echo "$search" | first_trace_id)
@@ -278,10 +278,10 @@ open('${src}', 'w').write(src)
     info "Patched Gateway.java — inject() call removed"
     rebuild_and_restart "gateway"
 
-    local tenant="break-req6-$$"
-    send_and_wait "${tenant}" 25
+    local ep="break-req6-$$"
+    send_and_wait "${ep}" 25
 
-    local search; search=$(search_by_tenant "${tenant}")
+    local search; search=$(search_by_ep "${ep}")
     local tid; tid=$(echo "$search" | first_trace_id)
     if [[ -z "$tid" ]]; then
         pass "REQ 6 BROKEN: No gateway trace — inject() not called, nothing written to message"
@@ -324,19 +324,19 @@ open('${src}', 'w').write(src)
     info "Patched Validator.java — extract() bypassed, always uses Context.root()"
     rebuild_and_restart "validator"
 
-    local tenant="break-req7-$$"
-    send_and_wait "${tenant}" 25
+    local ep="break-req7-$$"
+    send_and_wait "${ep}" 25
 
     # Tenant baggage IS in the message (gateway still injects), but validator doesn't extract it
     # So validator.handle span won't have bsi.ep attribute
-    local search; search=$(search_by_tenant "${tenant}")
+    local search; search=$(search_by_ep "${ep}")
     local count; count=$(echo "$search" | count_traces)
 
     # The gateway span WILL have bsi.ep (it sets it as span attribute explicitly)
     # But validator onwards will NOT have bsi.ep since baggage wasn't extracted
     local tid; tid=$(echo "$search" | first_trace_id)
     if [[ -z "$tid" ]]; then
-        pass "REQ 7 BROKEN: No trace found by tenant — baggage context lost entirely"
+        pass "REQ 7 BROKEN: No trace found by bsi.ep — baggage context lost entirely"
     else
         local trace; trace=$(fetch_trace "$tid")
         local svc_line; svc_line=$(echo "$trace" | count_services)
@@ -376,12 +376,12 @@ open('${src}', 'w').write(src)
     info "Patched Validator.java — setParent(extractedCtx) replaced with setParent(Context.root())"
     rebuild_and_restart "validator"
 
-    local tenant="break-req8-$$"
-    send_and_wait "${tenant}" 25
+    local ep="break-req8-$$"
+    send_and_wait "${ep}" 25
 
     # Find the gateway trace specifically — it will always have bsi.ep (set explicitly)
     local gw_search; gw_search=$(curl -s -G "${TEMPO_URL}/api/search" \
-        --data-urlencode "q={ span.bsi.ep = \"${tenant}\" && resource.service.name = \"gateway\" }" \
+        --data-urlencode "q={ span.bsi.ep = \"${ep}\" && resource.service.name = \"gateway\" }" \
         --data-urlencode "limit=3" 2>/dev/null)
     local gw_tid; gw_tid=$(echo "$gw_search" | first_trace_id)
 

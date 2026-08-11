@@ -19,8 +19,8 @@ public class Validator {
 
     private static final Logger log = Logger.getLogger(Validator.class.getName());
 
-    // Tenants explicitly blocked — simulates a denylist check against an internal registry.
-    private static final Set<String> BLOCKED_TENANTS = Set.of("bad-tenant", "blocked");
+    // Customer journeys explicitly blocked — simulates a denylist check against an internal registry.
+    private static final Set<String> BLOCKED_CJS = Set.of("bad-cj", "blocked");
 
     private final OpenTelemetry otel;
     private final Tracer tracer;
@@ -57,11 +57,12 @@ public class Validator {
             // Configurable via REQUIRED_BAGGAGE_KEY; defaults to bsi.ep.
             String requiredKey   = env("REQUIRED_BAGGAGE_KEY", "bsi.ep");
             String primaryValue  = requiredKey.isEmpty() ? null : baggage.getEntryValue(requiredKey);
+            String cj            = baggage.getEntryValue("bsi.cj");
 
             if (!requiredKey.isEmpty() && (primaryValue == null || primaryValue.isBlank())) {
                 reject(message, "missing " + requiredKey, consumerSpan);
-            } else if (primaryValue != null && BLOCKED_TENANTS.contains(primaryValue)) {
-                reject(message, requiredKey + " blocked: " + primaryValue, consumerSpan);
+            } else if (cj != null && BLOCKED_CJS.contains(cj)) {
+                reject(message, "bsi.cj blocked: " + cj, consumerSpan);
             } else {
                 forward(message, baggage);
                 log.info("Validated OK | " + requiredKey + "=" + primaryValue);
