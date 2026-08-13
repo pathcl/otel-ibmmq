@@ -1,27 +1,27 @@
 # Lab: OTel Baggage Propagation over IBM MQ/JMS
 
-Demonstrates propagating business context (tenant ID, user ID) across an IBM MQ
-async boundary using the OpenTelemetry SDK. Traces land in Tempo, metrics in
-Prometheus — both visible in Grafana, with a custom Scenes plugin showing a
-tenant-filtered service graph with error-rate arc segments.
+Demonstrates propagating business context (`bsi.ep`, `bsi.ch`, `bsi.cj`) across an
+IBM MQ async boundary using the OpenTelemetry SDK. Traces land in Tempo, metrics in
+Prometheus — both visible in Grafana, with a custom Scenes plugin showing an
+entry-point-filtered service graph with error-rate arc segments.
 
 Two scenarios are available:
 
 | Scenario | Description | Entry point |
 |----------|-------------|-------------|
 | **middle** (default) | IBM MQ sits mid-chain — a Go `upstream` service owns the trace root and injects `traceparent` + baggage before calling gateway | `http://localhost:8081/order` |
-| **origin** | Gateway is the trace root — no upstream service; tenant/user come from HTTP headers | `http://localhost:8080/send` |
+| **origin** | Gateway is the trace root — no upstream service; baggage comes from HTTP headers | `http://localhost:8080/send` |
 
 ## Stack
 
 | Component            | Image / runtime                                  |
 |----------------------|--------------------------------------------------|
-| IBM MQ               | `icr.io/ibm-messaging/mq:latest` — multi-arch; native ARM64 since 9.3.3.0 ([blog](https://community.ibm.com/community/user/blogs/richard-coppen/2023/06/30/ibm-mq-9330-container-image-now-available-for-appl)) |
+| IBM MQ               | `icr.io/ibm-messaging/mq:9.4.5.0-r1` — multi-arch; native ARM64 since 9.3.3.0 ([blog](https://community.ibm.com/community/user/blogs/richard-coppen/2023/06/30/ibm-mq-9330-container-image-now-available-for-appl)) |
 | OTel Collector       | `otel/opentelemetry-collector-contrib`          |
 | Tempo                | `grafana/tempo:2.10.7`                          |
 | Prometheus           | `prom/prometheus:latest`                        |
 | Grafana (lab)        | `grafana/grafana:latest` — port **3001**        |
-| Grafana (plugin dev) | `grafana/grafana:latest` — port **3000**        |
+| Grafana (plugin dev) | `grafana/grafana:latest` — port **3000** (`start.sh up all` only) |
 | upstream             | Go 1.22, built locally (middle scenario only)   |
 | gateway              | Java 21, built locally — PRODUCER               |
 | validator            | Java 21, built locally — pipeline stage 1       |
@@ -33,17 +33,14 @@ Two scenarios are available:
 
 ## Start
 
-Use `start.sh` from the repository root. It builds the plugin, starts all
-containers, and launches the webpack dev server for the plugin.
-
 ```bash
-# Middle-of-chain (default) — upstream → gateway → IBM MQ pipeline
+# Lab only — IBM MQ pipeline + Grafana on port 3001 (default)
 ./start.sh
 
-# Same as above, explicit
-./start.sh up middle
+# Full stack — also starts tutorial Grafana on port 3000 + webpack dev server
+./start.sh up all
 
-# Origin — gateway is the trace root, no upstream service
+# Origin scenario — gateway is the trace root, no upstream service
 ./start.sh up origin
 ```
 
@@ -57,11 +54,12 @@ retry automatically.
 
 ```bash
 curl -X POST http://localhost:8081/order \
-  -H "X-bsi-ep: acme" \
-  -H "X-bsi-ch: user42"
+  -H "X-bsi-ep: checkout" \
+  -H "X-bsi-ch: android" \
+  -H "X-bsi-cj: MoneyTransfer"
 ```
 
-The upstream service creates the root span, sets `bsi.ep`/`bsi.ch` baggage,
+The upstream service creates the root span, sets `bsi.ep`/`bsi.ch`/`bsi.cj` baggage,
 injects W3C headers (`traceparent`, `baggage`) into its HTTP call to gateway,
 and gateway forwards them unchanged into IBM MQ.
 
@@ -69,36 +67,47 @@ and gateway forwards them unchanged into IBM MQ.
 
 ```bash
 curl -X POST http://localhost:8080/send \
-  -H "X-bsi-ep: acme" \
-  -H "X-bsi-ch: user42"
+  -H "X-bsi-ep: checkout" \
+  -H "X-bsi-ch: android" \
+  -H "X-bsi-cj: MoneyTransfer"
 ```
 
-Send a few messages with different tenant IDs (traffic-gen does this automatically
-once running, but manual sends give you control over timing):
+Send messages with different entry points to generate varied traffic:
 
 ```bash
-for tenant in acme globex initech; do
+for ep in checkout payment account; do
   curl -s -X POST http://localhost:8081/order \
-    -H "X-bsi-ep: $tenant" \
-    -H "X-bsi-ch: user1"
-  echo "$tenant: sent"
+    -H "X-bsi-ep: $ep" \
+    -H "X-bsi-ch: web" \
+    -H "X-bsi-cj: MoneyTransfer"
+  echo "$ep: sent"
 done
+```
+
+Trigger the DLQ path (validator blocks `bsi.cj=blocked`):
+
+```bash
+curl -X POST http://localhost:8081/order \
+  -H "X-bsi-ep: checkout" \
+  -H "X-bsi-ch: android" \
+  -H "X-bsi-cj: blocked"
 ```
 
 ## Observe
 
 | URL | What you see |
 |-----|--------------|
-| http://localhost:3000 | Grafana — `otel-mq-app` Scenes plugin (service graph, tenant debug) |
 | http://localhost:3001 | Grafana — "OTel IBM MQ Baggage Lab" dashboard |
 | http://localhost:3001/explore | Tempo trace search — filter by `bsi.ep` |
 | http://localhost:9090 | Prometheus — query `traces_service_graph_request_total` |
 | https://localhost:9443 | IBM MQ web console (`admin` / `passw0rd`) |
+| http://localhost:3000 | Grafana — `otel-mq-app` Scenes plugin (`start.sh up all` only) |
 
 **Trace search** — in Grafana Explore → Tempo, use TraceQL:
 
 ```
 { span.bsi.ep = "checkout" }
+{ span.bsi.cj = "MoneyTransfer" && resource.service.name = "processor" }
 ```
 
 **Middle scenario** trace shape:
@@ -120,26 +129,61 @@ gateway.send (root, PRODUCER)
               └── processor.handle (CONSUMER)
 ```
 
-**Service graph plugin** (port 3000) — the Home tab shows a node graph with
-error-rate arc segments (green = success, red = error). The Tenant Debug tab
-filters edges and nodes to a single tenant via a `$tenant` variable.
-
 ## Stop
 
 ```bash
-# Stop the default (middle) scenario
-./start.sh down
-
-# Stop the origin scenario
-./start.sh down origin
+./start.sh down          # stop the lab
+./start.sh down all      # stop lab + tutorial Grafana + webpack
+./start.sh down origin   # stop the origin scenario
 ```
 
-To also remove the Tempo data volume, stop manually with:
+To also remove the Tempo data volume:
 
 ```bash
 docker compose -f labs/otel-ibmmq/docker-compose.yml \
                -f labs/otel-ibmmq/docker-compose.upstream.yml \
                down -v
+```
+
+## API Exit (optional)
+
+`api-exit/` contains a reference implementation of an IBM MQ `ApiExitLocal` in C
+that intercepts `MQPUT`/`MQGET` to inject/extract `traceparent` automatically —
+useful for understanding how APM vendors instrument IBM MQ without touching
+application code. See [ibmmq-qa.md](docs/ibmmq-qa.md) for context.
+
+**Install into the running lab:**
+
+```bash
+./labs/otel-ibmmq/api-exit/install.sh
+```
+
+This compiles `otel_exit.so` inside the container, patches `qm.ini` with the
+`ApiExitLocal` stanza, restarts the container, and re-applies `PROPCTL(ALL)`.
+Changes persist in the Docker volume across restarts but are lost on `down -v`.
+
+**Watch the exit output:**
+
+```bash
+docker logs -f <container-name> 2>&1 | grep otel-exit
+```
+
+**Remove when done:**
+
+```bash
+./labs/otel-ibmmq/api-exit/uninstall.sh
+```
+
+Strips the stanza from `qm.ini`, removes the `.so`, and restarts clean.
+
+## Tests
+
+```bash
+# Verify all hard requirements pass (30 checks)
+./labs/otel-ibmmq/tests/verify-hard-requirements.sh
+
+# Break each requirement one at a time and confirm the expected failure
+./labs/otel-ibmmq/tests/break-requirements.sh
 ```
 
 ## Documentation
