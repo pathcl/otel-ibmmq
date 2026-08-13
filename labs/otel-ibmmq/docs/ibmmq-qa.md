@@ -743,3 +743,60 @@ make install   # copies to /var/mqm/exits64/
 
 The exit handles the wire format; it cannot replace the SDK for span creation,
 baggage population, or telemetry export.
+
+---
+
+## What is the difference between ApiExitCommon and ApiExitLocal? `#ibmmq`
+
+Both are API exit stanzas but they live at different levels of IBM MQ's configuration
+hierarchy and have different scope.
+
+IBM MQ has three distinct configuration levels:
+
+```
+/var/mqm/mqs.ini                ← system level — all queue managers on this host
+/var/mqm/qmgrs/QM1/qm.ini      ← queue manager level — this QM only
+MQSC commands (runmqsc)         ← object level — queues, channels, topics
+```
+
+| Stanza | File | Scope |
+|---|---|---|
+| `ApiExitCommon` | `mqs.ini` | every queue manager on the host |
+| `ApiExitLocal` | `qm.ini` | this queue manager only |
+
+If a host runs QM1, QM2, and QM3:
+- An `ApiExitCommon` in `mqs.ini` intercepts `MQPUT`/`MQGET` on all three
+- An `ApiExitLocal` in `QM1/qm.ini` intercepts only QM1's traffic
+
+### Where exits fit vs other IBM MQ configuration
+
+```
+mqs.ini
+  └── ApiExitCommon        ← exit applied to all QMs on this host
+
+qm.ini
+  └── ApiExitLocal         ← exit applied to this QM only
+  └── Log                  ← logging config
+  └── TCP                  ← listener port
+  └── Channels             ← channel defaults
+
+MQSC (runmqsc)
+  └── ALTER QLOCAL PROPCTL ← queue attribute
+  └── ALTER CHANNEL        ← channel config
+  └── DEFINE TOPIC         ← pub/sub
+```
+
+These are not queue configuration — they are queue manager runtime configuration
+that affects how the MQ API behaves for every application connected to the QM.
+Queue configuration (PROPCTL, MAXDEPTH, etc.) is separate and done via MQSC.
+
+### When to use which
+
+- **`ApiExitCommon`** — shared MQ platform where you want to enforce tracing across
+  every queue manager without touching each one's `qm.ini`. One entry covers the
+  whole host.
+- **`ApiExitLocal`** — instrument only specific queue managers. A QM running payment
+  processing gets the tracing exit; a QM running admin tooling does not.
+
+This lab uses `ApiExitLocal` in `qm.ini` because we have one queue manager (QM1)
+and want explicit control over what gets instrumented.
