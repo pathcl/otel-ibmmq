@@ -1070,3 +1070,37 @@ as a JMS property. One more step and you have the OTel SDK doing it properly.
 The exit closes the `traceparent` gap for legacy producers. It cannot close the
 baggage gap without application cooperation — and if the application cooperates,
 you might as well use the SDK.
+
+---
+
+## Is there any way to inject baggage if the producer has no OTel SDK? `#ibmmq` `#o11y`
+
+No — with one precise caveat.
+
+The exit cannot invent baggage values it does not have. If a COBOL program puts a
+message with no business context anywhere, the exit sees only the raw `MQPUT` call
+— queue name, message buffer, MQMD fields. There is no `bsi.ep`, no customer
+journey, nothing to inject.
+
+### The one exception
+
+If the business context exists somewhere the exit can reach at the moment of
+`MQPUT`:
+
+- The application set it as a JMS/MQ property on the message before calling
+  `MQPUT` — the exit can read it and reformat as W3C baggage
+- The application stored it in thread-local storage — the exit runs in the same
+  process and thread, so it could read from TLS if both sides agree on the key
+
+But in both cases the application is already participating — it made a deliberate
+choice to put that data somewhere. At that point the gap between "app sets a JMS
+property" and "app calls the OTel SDK" is small. It is a matter of which API you
+use to attach the value, not whether the application needs to know the value.
+
+### The real-world rule
+
+> Baggage requires the application to know the value and put it somewhere.
+> The exit can only reformat or forward — it cannot invent.
+
+The exit's value is purely `traceparent` generation for legacy producers that
+produce no context at all. For baggage, there is no shortcut.
