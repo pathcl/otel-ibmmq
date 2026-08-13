@@ -572,3 +572,54 @@ In practice `ApiExitLocal` alone gives you connected traces but empty business
 context. You can see that spans are linked across services but cannot answer which
 entry point triggered a failure or which customer journey is generating DLQ traffic.
 Those questions require baggage, and baggage requires the application to participate.
+
+---
+
+## How do you inspect the `<usr>` folder in amqsbcg output? `#ibmmq` `#o11y`
+
+Each MQRFH2 folder (`<mcd>`, `<jms>`, `<usr>`) appears as a single line under the
+`RFH data :` block in `amqsbcg` output. Use `grep` to isolate it:
+
+```bash
+docker compose -f labs/otel-ibmmq/docker-compose.yml exec ibmmq \
+  bash -c '/opt/mqm/samp/bin/amqsbcg DEV.DEAD.LETTER.QUEUE QM1' | grep '<usr>'
+```
+
+The raw output structure:
+
+```
+RFH :
+  StrucId        : 'RFH '
+  Version        : 2
+  StrucLength    : 312
+  ...
+
+RFH data :
+  <mcd><Msd>jms_text</Msd></mcd>
+  <jms><Dst>queue:///DEV.DEAD.LETTER.QUEUE</Dst><Tms>1723500000000</Tms></jms>
+  <usr><traceparent>00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01</traceparent><tracestate></tracestate><baggage>bsi.ep=checkout,bsi.ch=android,bsi.cj=blocked</baggage></usr>
+```
+
+For a more readable format, break the XML tags onto separate lines:
+
+```bash
+docker compose -f labs/otel-ibmmq/docker-compose.yml exec ibmmq \
+  bash -c '/opt/mqm/samp/bin/amqsbcg DEV.DEAD.LETTER.QUEUE QM1' \
+  | grep '<usr>' \
+  | sed 's/></>\n</g'
+```
+
+Output:
+
+```xml
+<usr>
+<traceparent>00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01</traceparent>
+<tracestate></tracestate>
+<baggage>bsi.ep=checkout,bsi.ch=android,bsi.cj=blocked</baggage>
+</usr>
+```
+
+The DLQ is the most reliable queue to inspect — messages accumulate there and are
+not consumed, so there is no timing pressure. On active pipeline queues
+(`DEV.QUEUE.1`–`DEV.QUEUE.3`) messages are drained in milliseconds; stop
+`traffic-gen` first to create a browse window.
