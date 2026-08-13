@@ -337,7 +337,7 @@ pulls the amd64 layer. No configuration change is required for either platform.
 
 ---
 
-## What does the TraceQL syntax look like for querying by tenant? `#o11y`
+## What does the TraceQL syntax look like for querying by entry point? `#o11y`
 
 ```
 { span.bsi.ep = "checkout" }
@@ -385,3 +385,190 @@ The manual SDK approach (`JmsCarrier` + explicit span builders) gives more contr
 clearer pedagogy, and is actually less work here — SDK code is required anyway for
 the `bsi.*` attribute logic. Adding the agent would introduce a layer without
 removing any existing code.
+
+---
+
+## What are traceparent and baggage in IBM MQ's data model — headers or properties? `#ibmmq` `#o11y`
+
+Neither term maps directly. In IBM MQ's data model they are **message properties**
+— specifically JMS string properties stored in the `<usr>` folder of MQRFH2.
+
+When `JmsCarrier.SETTER` calls `message.setStringProperty(key, value)`, JMS writes
+the key-value pair into `<usr>`. The full structure of a message carrying OTel context:
+
+```
+MQMD  (fixed binary envelope — MsgId, CorrelId, Format=MQHRF2, ...)
+  └── MQRFH2
+        <mcd><Msd>jms_text</Msd></mcd>
+        <jms><Dst>queue:///DEV.QUEUE.1</Dst><Tms>1723500000000</Tms></jms>
+        <usr>
+          <traceparent>00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01</traceparent>
+          <tracestate></tracestate>
+          <baggage>bsi.ep=checkout,bsi.ch=android,bsi.cj=MoneyTransfer</baggage>
+        </usr>
+        └── message body: "order | checkout android MoneyTransfer"
+```
+
+The word "header" in IBM MQ refers to the MQRFH2 structure itself, not the
+individual fields inside it. Each transport maps OTel context to its own native
+mechanism:
+
+| Transport | traceparent/baggage live in |
+|---|---|
+| HTTP | `traceparent:` and `baggage:` headers |
+| Kafka | record headers (byte key/value pairs) |
+| IBM MQ | `<usr>` folder string properties inside MQRFH2 |
+| gRPC | metadata entries |
+
+The OTel SDK never knows which transport it is talking to — it only knows about
+carriers and key-value pairs. `JmsCarrier` is the adapter that makes the translation
+MQ-specific.
+
+---
+
+## Does the OTel Collector participate in context propagation across IBM MQ? `#o11y`
+
+No. Context propagation is entirely in-band with the message — `traceparent` and
+`baggage` travel as string properties inside the MQRFH2 `<usr>` folder, directly
+from producer to consumer. The Collector never sees the MQ messages.
+
+The Collector's role is **telemetry export** — receiving the spans that each service
+creates via OTLP and forwarding them to Tempo. Without it, traces would be
+assembled locally but never visible in Grafana.
+
+```
+gateway   ─┐
+validator  ├─→ OTLP → OTel Collector → Tempo → Grafana   (visibility)
+enricher   │
+processor  ┘
+
+gateway → <usr> traceparent in MQ message → validator                (propagation)
+```
+
+These are two independent paths. Removing the Collector breaks visibility; it has
+no effect on whether the trace context survives the MQ hop.
+
+The Collector is also technically optional — services could send OTLP directly to
+Tempo. The Collector adds batching, retry, and the ability to fan out to multiple
+backends without changing service configuration.
+
+---
+
+## What are entry and exit spans, and how do they map to inject/extract? `#o11y`
+
+Spans are classified by the direction of the call at a service boundary:
+
+| SpanKind | Direction | Role in propagation |
+|---|---|---|
+| `SERVER` / `CONSUMER` | Incoming (entry) | **Extract** context from the carrier |
+| `CLIENT` / `PRODUCER` | Outgoing (exit) | **Inject** context into the carrier |
+
+The rule: **extract at entry, inject at exit.**
+
+In this lab every boundary follows that pattern:
+
+```
+upstream (CLIENT exit)   → inject HTTP headers  → gateway  (SERVER entry) extracts
+gateway  (PRODUCER exit) → inject MQ message    → validator(CONSUMER entry) extracts
+validator(PRODUCER exit) → inject MQ message    → enricher (CONSUMER entry) extracts
+```
+
+In Java this maps directly to span kind:
+
+```java
+// EXIT — you own the outgoing carrier, so you inject
+Span producerSpan = tracer.spanBuilder("gateway.send")
+    .setSpanKind(SpanKind.PRODUCER)
+    .startSpan();
+propagator.inject(Context.current(), message, JmsCarrier.SETTER);
+
+// ENTRY — you receive the carrier, so you extract
+Context extracted = propagator.extract(Context.root(), message, JmsCarrier.GETTER);
+Span consumerSpan = tracer.spanBuilder("validator.handle")
+    .setSpanKind(SpanKind.CONSUMER)
+    .setParent(extracted)
+    .startSpan();
+```
+
+REQ 5 and REQ 6 in `break-requirements.sh` break the exit side (no inject).
+REQ 7 and REQ 8 break the entry side (no extract / no setParent).
+
+---
+
+## ApiExitLocal — when would you use it and how does it compare to the OTel SDK? `#ibmmq` `#o11y`
+
+`ApiExitLocal` is a C shared library loaded by the queue manager that intercepts
+every MQ API call — `MQPUT`, `MQGET`, `MQOPEN`, `MQCLOSE` — before and after it
+completes. Configured in `qm.ini`:
+
+```ini
+ApiExitLocal:
+  Name=OtelPropagator
+  Module=/opt/mqm/exits/otel_propagator.so
+  Function=OtelApiExit
+  Sequence=1
+```
+
+### When it wins over the OTel SDK
+
+- **You own the infrastructure but not the application code** — legacy COBOL, C batch
+  jobs, or vendor systems that cannot be modified. The exit instruments every `MQPUT`
+  and `MQGET` regardless of the producer language.
+- **Mixed estate** — some producers are JMS (instrumented), some are native MQ C API
+  (not instrumented). The exit enforces a consistent policy: every message carries
+  `traceparent`, no per-team SDK adoption required.
+
+### Comparison
+
+| | ApiExitLocal | OTel SDK |
+|---|---|---|
+| Language | C only | any |
+| Code changes required | no | yes — every service |
+| Trace breaks if one service skips it | no — exit covers all | yes |
+| Baggage support | implement from scratch | W3C spec handled by SDK |
+| Debuggability | very hard — crash = QM process down | standard OTel tooling |
+| Portability | MQ-specific | any transport |
+| PROPCTL still needed | yes | yes |
+
+### "Implement from scratch" means
+
+At the C API level there is no OTel SDK available. To inject `traceparent` you must:
+generate a valid 16-byte trace ID, generate an 8-byte span ID, format the
+`00-{traceId}-{spanId}-{flags}` string, parse incoming `traceparent` to extract the
+parent, write it back as an MQRFH2 property using the MQ C API, handle sampling
+flags, and do the same for the `baggage` `key=value,key=value` format. The SDK
+does all of this for you.
+
+### Volume concern
+
+The exit fires on **every** `MQPUT` and `MQGET` across the entire queue manager —
+admin tools, health checks, batch jobs, IBM MQ internals. Without explicit filtering
+logic (also written in C) you generate traces for everything on the QM. The SDK
+approach is intentional — you instrument only the services and queues you care about.
+
+---
+
+## Does ApiExitLocal remove the need to instrument producers for baggage? `#ibmmq` `#o11y`
+
+No. `ApiExitLocal` can inject `traceparent` automatically — it intercepts `MQPUT`
+and writes the trace ID into the `<usr>` folder. But `baggage` is a different problem.
+
+Baggage carries business context:
+
+```
+bsi.ep=checkout,bsi.ch=android,bsi.cj=MoneyTransfer
+```
+
+The exit has no access to this information. It runs at the MQ API level and sees
+only raw `MQPUT` calls and message buffers — not the HTTP request that originated
+the transaction, not the application's in-memory state, not which entry point or
+customer journey this message belongs to. That information only exists in the
+application.
+
+So even with `ApiExitLocal` handling `traceparent` automatically, you still need
+the application to attach baggage — which means instrumenting the producers anyway.
+
+In practice `ApiExitLocal` alone gives you connected traces but empty business
+context. You can see that spans are linked across services but cannot answer which
+entry point triggered a failure or which customer journey is generating DLQ traffic.
+Those questions require baggage, and baggage requires the application to participate.
