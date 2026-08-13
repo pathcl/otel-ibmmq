@@ -880,3 +880,51 @@ But it does not help with W3C baggage propagation for three reasons:
 
 For any greenfield service you control, the OTel SDK approach is the right answer.
 The exit is an enterprise legacy integration tool, not a context propagation strategy.
+
+---
+
+## Instana supports OpenTelemetry — can we use it alongside Tempo? `#o11y`
+
+Yes, and that changes the picture significantly. Instana added OTLP ingestion, so
+the OTel Collector can fan out the same span stream to both backends:
+
+```
+Services (OTel SDK)
+    │
+    │ OTLP
+    ▼
+OTel Collector
+    ├──► Tempo      (Grafana queries)
+    └──► Instana    (alerting, dashboards, Instana-specific features)
+```
+
+In this setup services use the OTel SDK — inject/extract W3C `traceparent`, build
+baggage, stamp `bsi.ep` on every span. Both Tempo and Instana receive the same spans
+with full business context. Instana's API exit becomes irrelevant for any service
+running the OTel SDK — the SDK already handles inject/extract, adding the exit would
+be double instrumentation.
+
+### Mixed estate reality
+
+In a large enterprise some services have the OTel SDK, others are legacy apps that
+cannot be modified:
+
+```
+Legacy COBOL app  →  Instana API exit  →  traceparent only, no baggage
+Java service      →  OTel SDK          →  traceparent + baggage on every span
+                                               │
+                                         OTel Collector
+                                               ├──► Tempo
+                                               └──► Instana
+```
+
+Both ends appear in Instana, correlated via trace ID. But the COBOL spans have no
+`bsi.ep` (the exit cannot supply it) while the Java spans do. Metric queries by
+business dimension only work for the instrumented side.
+
+### Practical conclusion
+
+OTel SDK + Collector is the right foundation. Instana as a backend is just another
+Collector exporter — add it with one extra `exporters:` block in
+`otel-collector/config.yaml`. The API exit is a fallback for the parts of the
+estate you cannot reach with the SDK.
