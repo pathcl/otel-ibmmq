@@ -1013,3 +1013,60 @@ not the request that caused it.
 The exit is a partial solution for a legacy constraint. For any system you design
 from scratch, the OTel SDK with proper inject/extract at every boundary is the
 only approach that gives you a complete picture.
+
+---
+
+## Does the API exit create a traceparent on every MQPUT? Can it carry baggage? `#ibmmq` `#o11y`
+
+### traceparent — not every time
+
+The exit checks for an existing `traceparent` before generating one:
+
+```c
+MQINQMP(*pHconn, hmsg, &impo, &propName, ...);  /* check existing */
+
+if (CC == MQCC_OK) {
+    goto done;  /* already present — SDK injected it, skip */
+}
+make_traceparent(traceparent);  /* only if absent */
+MQSETMP(...);
+```
+
+If the OTel SDK already injected a `traceparent`, the exit finds it and does
+nothing. It only generates one for producers that arrive at the queue with an
+empty `<usr>` folder.
+
+### baggage — only if the application cooperates
+
+The exit CAN write a `baggage` string property — but it has nothing to put in it
+for uninstrumented producers. It cannot know `bsi.ep=checkout` because that value
+exists in the HTTP request the application received, not in the MQ API call the
+exit intercepts.
+
+There is one scenario where it works: if the application has already written
+business values as individual JMS properties before calling `MQPUT`, the exit
+could read them on the before-hook and assemble a W3C `baggage` string:
+
+```c
+MQINQMP(*pHconn, hmsg, ..., "bsi.ep", ..., ep_value, ...);
+MQINQMP(*pHconn, hmsg, ..., "bsi.ch", ..., ch_value, ...);
+
+snprintf(baggage, sizeof(baggage),
+         "bsi.ep=%s,bsi.ch=%s", ep_value, ch_value);
+MQSETMP(*pHconn, hmsg, ..., "baggage", ..., baggage, ...);
+```
+
+But at that point the application is already doing half the work — setting `bsi.ep`
+as a JMS property. One more step and you have the OTel SDK doing it properly.
+
+### Summary
+
+| Scenario | traceparent via exit | baggage via exit |
+|---|---|---|
+| Fully uninstrumented legacy app | yes — exit generates a root | no — no source data |
+| App sets individual JMS properties | yes — exit skips if SDK present | possible — exit can reformat them |
+| App uses OTel SDK | exit skips | exit skips — SDK already did it |
+
+The exit closes the `traceparent` gap for legacy producers. It cannot close the
+baggage gap without application cooperation — and if the application cooperates,
+you might as well use the SDK.
