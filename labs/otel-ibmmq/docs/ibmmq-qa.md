@@ -656,3 +656,90 @@ The baggage limitation still applies regardless of vendor: the exit can carry tr
 IDs automatically but has no knowledge of business context (`bsi.ep`, `bsi.cj`).
 Vendors typically solve this by correlating their own trace IDs on the APM backend
 rather than embedding business attributes in the message itself.
+
+---
+
+## What does an ApiExitLocal look like in practice? `#ibmmq` `#o11y`
+
+A reference implementation is in `api-exit/otel_exit.c`. The key sections:
+
+### Entry point — registered in qm.ini, called once at load
+
+```c
+void MQENTRY OtelExitInit(PMQAXP pExitParms, PMQAXC pExitContext,
+                          PMQLONG pCompCode, PMQLONG pReason)
+{
+    MQXEP(pExitParms->Hconfig, MQXR_BEFORE, MQXF_PUT,
+          (PMQFUNC)BeforePut, &CC, &RC);   /* intercept every MQPUT */
+
+    MQXEP(pExitParms->Hconfig, MQXR_AFTER, MQXF_GET,
+          (PMQFUNC)AfterGet, &CC, &RC);    /* intercept every MQGET */
+}
+```
+
+### BeforePut — inject traceparent if absent
+
+```c
+void MQENTRY BeforePut(..., PMQPMO pPutMsgOpts, ...)
+{
+    MQHMSG hmsg = pPutMsgOpts->OriginalMsgHandle;
+
+    /* check if traceparent already present — don't overwrite upstream context */
+    MQINQMP(*pHconn, hmsg, &impo, &propName, ...);
+
+    if (not present) {
+        make_traceparent(traceparent);          /* generate 00-{traceId}-{spanId}-01 */
+        MQSETMP(*pHconn, hmsg, ..., traceparent);  /* write into <usr> folder */
+    }
+
+    /* NEVER fail the PUT — tracing must not break message flow */
+    *pCompCode = MQCC_OK;
+}
+```
+
+### AfterGet — extract traceparent
+
+```c
+void MQENTRY AfterGet(..., PMQGMO pGetMsgOpts, ...)
+{
+    MQHMSG hmsg = pGetMsgOpts->MsgHandle;
+    MQINQMP(*pHconn, hmsg, ..., traceparent, ...);
+
+    if (found) {
+        /* store in thread-local storage so the application can read it */
+        pthread_setspecific(tls_key, strdup(traceparent));
+    }
+}
+```
+
+### qm.ini configuration
+
+```ini
+ApiExitLocal:
+  Name=OtelPropagator
+  Module=/var/mqm/exits64/otel_exit
+  Function=OtelExitInit
+  Sequence=1
+```
+
+### Build
+
+```bash
+cd api-exit
+make
+make install   # copies to /var/mqm/exits64/
+# restart QM1 to load the exit
+```
+
+### What this does not do vs the OTel SDK
+
+| | ApiExitLocal | OTel SDK (this lab) |
+|---|---|---|
+| Injects traceparent | yes — automatically | yes — explicitly via JmsCarrier |
+| Injects baggage (bsi.ep etc.) | no — no application context | yes — application builds it |
+| Creates spans | no — headers only | yes |
+| Exports to Collector | no | yes |
+| Works for non-Java producers | yes | no — SDK is language-specific |
+
+The exit handles the wire format; it cannot replace the SDK for span creation,
+baggage population, or telemetry export.
