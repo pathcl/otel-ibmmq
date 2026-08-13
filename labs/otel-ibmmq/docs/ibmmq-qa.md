@@ -843,3 +843,40 @@ dlq-handler → MQCONN(QM1) → MQGET(DEV.DEAD.LETTER.QUEUE)
 All five services connect to the same QM1. The queue manager is the single point
 through which every message passes — which is exactly why `PROPCTL` and
 `ApiExitLocal` are configured there rather than in each application.
+
+---
+
+## Why would Instana use ApiExitLocal — does it help with baggage and context propagation? `#ibmmq` `#o11y`
+
+For baggage and context propagation specifically, it is overkill. Instana's API
+exit solves a different problem: **connecting traces across MQ when you cannot
+touch the application code**. It injects and extracts Instana's own trace headers
+automatically, which is useful for getting end-to-end visibility in a legacy estate.
+
+But it does not help with W3C baggage propagation for three reasons:
+
+- **Baggage still requires the application** — the exit cannot carry `bsi.ep`,
+  `bsi.cj`, or any business context because that information only exists inside
+  the application. The exit sees raw `MQPUT`/`MQGET` calls, not HTTP requests or
+  application state.
+- **Proprietary header format** — Instana uses its own trace headers, not W3C
+  `traceparent`. It only works end-to-end if every service in the chain also runs
+  an Instana agent. Mixed environments (some OTel, some Instana) break the chain.
+- **Vendor-locked backend** — connected traces appear in Instana's backend, not in
+  Tempo or any OTel-compatible system.
+
+### When Instana's exit is actually useful
+
+- Uninstrumented legacy apps (COBOL, C) you cannot modify
+- Already all-in on Instana as the APM backend
+- Need trace connectivity only — no business baggage required
+
+### When it is not useful
+
+- You want W3C-standard `traceparent`/`baggage`
+- You need business context (`bsi.ep`, `bsi.cj`) on spans
+- Your backend is OTel-compatible (Tempo, Jaeger, Grafana)
+- You control the application code and can add the OTel SDK
+
+For any greenfield service you control, the OTel SDK approach is the right answer.
+The exit is an enterprise legacy integration tool, not a context propagation strategy.
