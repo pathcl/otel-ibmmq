@@ -800,3 +800,46 @@ Queue configuration (PROPCTL, MAXDEPTH, etc.) is separate and done via MQSC.
 
 This lab uses `ApiExitLocal` in `qm.ini` because we have one queue manager (QM1)
 and want explicit control over what gets instrumented.
+
+---
+
+## What is the role of the queue manager? `#ibmmq`
+
+The queue manager (QM) is the core runtime process of IBM MQ — everything goes
+through it.
+
+### What it owns and manages
+
+```
+Queue Manager (QM1)
+  ├── Queues       DEV.QUEUE.1, DEV.QUEUE.2, DEV.QUEUE.3, DEV.DEAD.LETTER.QUEUE
+  ├── Channels     DEV.APP.SVRCONN  (applications connect via this)
+  ├── Listeners    port 1414        (accepts incoming TCP connections)
+  ├── Auth records who can connect, who can put/get on which queue
+  └── Exits        ApiExitLocal — loaded and run by the QM on every API call
+```
+
+### What it does at runtime
+
+- Applications do not connect to a queue — they connect to the **queue manager**,
+  then address a queue by name
+- The QM receives `MQPUT` calls, stores the message durably (on disk if persistent),
+  and holds it until a consumer calls `MQGET`
+- It enforces message delivery guarantees: ordering, persistence, transactions
+- It enforces `PROPCTL` on each queue — stripping or preserving MQRFH2 on delivery
+- It runs API exits before/after every `MQPUT`/`MQGET`
+- It moves messages between queue managers via channels (MCA — Message Channel Agents)
+
+### In this lab
+
+```
+gateway     → MQCONN(QM1) → MQPUT(DEV.QUEUE.1)
+validator   → MQCONN(QM1) → MQGET(DEV.QUEUE.1) → MQPUT(DEV.QUEUE.2)
+enricher    → MQCONN(QM1) → MQGET(DEV.QUEUE.2) → MQPUT(DEV.QUEUE.3)
+processor   → MQCONN(QM1) → MQGET(DEV.QUEUE.3)
+dlq-handler → MQCONN(QM1) → MQGET(DEV.DEAD.LETTER.QUEUE)
+```
+
+All five services connect to the same QM1. The queue manager is the single point
+through which every message passes — which is exactly why `PROPCTL` and
+`ApiExitLocal` are configured there rather than in each application.
