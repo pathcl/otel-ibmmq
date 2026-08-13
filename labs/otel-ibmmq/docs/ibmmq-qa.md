@@ -623,3 +623,36 @@ The DLQ is the most reliable queue to inspect — messages accumulate there and 
 not consumed, so there is no timing pressure. On active pipeline queues
 (`DEV.QUEUE.1`–`DEV.QUEUE.3`) messages are drained in milliseconds; stop
 `traffic-gen` first to create a browse window.
+
+---
+
+## Is ApiExitLocal where APM vendors plug in their IBM MQ tracing agents? `#ibmmq` `#o11y`
+
+Yes. `ApiExitLocal` is the standard IBM MQ extension point that APM vendors use to
+ship IBM MQ instrumentation without touching application code.
+
+Examples of what ships as an `ApiExitLocal`:
+
+- **Instana** — their IBM MQ sensor is an API exit. It intercepts `MQPUT`/`MQGET`,
+  injects and extracts Instana trace headers into MQRFH2 properties, and reports
+  spans back to the Instana agent running on the host.
+- **Dynatrace** — same pattern. The OneAgent includes an MQ API exit that instruments
+  all MQ traffic on the queue manager automatically.
+- **AppDynamics** — also ships an API exit for IBM MQ correlation.
+
+The pattern is always the same:
+
+```
+application → MQPUT → ApiExitLocal intercepts → injects vendor header → message on queue
+                                                                               ↓
+application ← MQGET ← ApiExitLocal intercepts ← extracts vendor header ← message delivered
+```
+
+Vendors have already implemented the header format, sampling, and context propagation
+logic in their C library. You configure it in `qm.ini`, deploy the `.so` file, and
+every `MQPUT`/`MQGET` on that queue manager is instrumented automatically.
+
+The baggage limitation still applies regardless of vendor: the exit can carry trace
+IDs automatically but has no knowledge of business context (`bsi.ep`, `bsi.cj`).
+Vendors typically solve this by correlating their own trace IDs on the APM backend
+rather than embedding business attributes in the message itself.
