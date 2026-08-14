@@ -1,0 +1,205 @@
+# Spring Boot 3 + Micrometer Tracing scenario — same IBM MQ pipeline, no javaagent.
+#
+# Run:
+#   docker compose up --build
+#
+# Run with upstream (middle-of-chain):
+#   docker compose -f docker-compose.yml -f docker-compose.upstream.yml up --build
+#
+# What differs from labs/otel-ibmmq:
+#   - No OtelConfig / OtelSdk init — Spring Boot autoconfigures tracing via actuator
+#   - No JmsCarrier — Spring JMS + Micrometer injects/extracts traceparent + baggage
+#   - No javaagent, no JAVA_TOOL_OPTIONS
+#   - Services use @JmsListener instead of consumer.receive() polling
+#   - Configuration via MANAGEMENT_* and SPRING_* env vars (Spring Boot relaxed binding)
+#   - OTLP/HTTP on port 4318 (Spring Boot Micrometer default)
+#
+# No custom SpanProcessor needed: the Micrometer span is live inside @JmsListener,
+# so application code calls tracer.currentSpan().tag(key, value) directly.
+
+services:
+  ibmmq:
+    image: icr.io/ibm-messaging/mq:9.4.5.0-r1
+    environment:
+      LICENSE: accept
+      MQ_QMGR_NAME: QM1
+      MQ_APP_PASSWORD: passw0rd
+    ports:
+      - "1414:1414"
+      - "9443:9443"
+    restart: on-failure
+    stop_grace_period: 60s
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.104.0
+    volumes:
+      - ../otel-ibmmq/otel-collector/config.yaml:/etc/otel-collector-config.yaml
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
+    depends_on:
+      - tempo
+    restart: on-failure
+
+  tempo:
+    image: grafana/tempo:2.10.7
+    user: root
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ../otel-ibmmq/tempo/tempo.yaml:/etc/tempo.yaml
+      - tempo-data:/tmp/tempo
+    ports:
+      - "3200:3200"
+    restart: on-failure
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ../otel-ibmmq/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.enable-remote-write-receiver'
+      - '--storage.tsdb.retention.time=7d'
+    ports:
+      - "9090:9090"
+    restart: on-failure
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: otel-mq
+    volumes:
+      - ../otel-ibmmq/grafana/provisioning:/etc/grafana/provisioning
+      - ../otel-ibmmq/grafana/dashboards:/var/lib/grafana/dashboards
+      - ../otel-ibmmq/otel-mq-app/dist:/var/lib/grafana/plugins/otel-mq
+    ports:
+      - "3001:3000"
+    depends_on:
+      - tempo
+      - prometheus
+    restart: on-failure
+
+  gateway:
+    build: ./gateway
+    environment:
+      SPRING_APPLICATION_NAME: gateway
+      MANAGEMENT_OTLP_TRACING_ENDPOINT: http://otel-collector:4318/v1/traces
+      MANAGEMENT_OTLP_METRICS_EXPORT_URL: http://otel-collector:4318
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
+      MANAGEMENT_TRACING_PROPAGATION_TYPE: W3C
+      REQUIRED_BAGGAGE_KEY: bsi.ep
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_QUEUE: DEV.QUEUE.1
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+    ports:
+      - "8080:8080"
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+  validator:
+    build: ./validator
+    environment:
+      SPRING_APPLICATION_NAME: validator
+      MANAGEMENT_OTLP_TRACING_ENDPOINT: http://otel-collector:4318/v1/traces
+      MANAGEMENT_OTLP_METRICS_EXPORT_URL: http://otel-collector:4318
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
+      MANAGEMENT_TRACING_PROPAGATION_TYPE: W3C
+      REQUIRED_BAGGAGE_KEY: bsi.ep
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_IN_QUEUE: DEV.QUEUE.1
+      IBM_MQ_NEXT_QUEUE: DEV.QUEUE.2
+      IBM_MQ_DLQ: DEV.DEAD.LETTER.QUEUE
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+  enricher:
+    build: ./enricher
+    environment:
+      SPRING_APPLICATION_NAME: enricher
+      MANAGEMENT_OTLP_TRACING_ENDPOINT: http://otel-collector:4318/v1/traces
+      MANAGEMENT_OTLP_METRICS_EXPORT_URL: http://otel-collector:4318
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
+      MANAGEMENT_TRACING_PROPAGATION_TYPE: W3C
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_IN_QUEUE: DEV.QUEUE.2
+      IBM_MQ_NEXT_QUEUE: DEV.QUEUE.3
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+  processor:
+    build: ./processor
+    environment:
+      SPRING_APPLICATION_NAME: processor
+      MANAGEMENT_OTLP_TRACING_ENDPOINT: http://otel-collector:4318/v1/traces
+      MANAGEMENT_OTLP_METRICS_EXPORT_URL: http://otel-collector:4318
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
+      MANAGEMENT_TRACING_PROPAGATION_TYPE: W3C
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_QUEUE: DEV.QUEUE.3
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+    deploy:
+      replicas: 2
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+  dlq-handler:
+    build: ./dlq-handler
+    environment:
+      SPRING_APPLICATION_NAME: dlq-handler
+      MANAGEMENT_OTLP_TRACING_ENDPOINT: http://otel-collector:4318/v1/traces
+      MANAGEMENT_OTLP_METRICS_EXPORT_URL: http://otel-collector:4318
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
+      MANAGEMENT_TRACING_PROPAGATION_TYPE: W3C
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_DLQ: DEV.DEAD.LETTER.QUEUE
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+  traffic-gen:
+    build:
+      context: ../otel-ibmmq/traffic-gen
+    command: ["-url", "http://gateway:8080/send", "-interval", "1s"]
+    depends_on:
+      - gateway
+    restart: on-failure
+
+volumes:
+  tempo-data:

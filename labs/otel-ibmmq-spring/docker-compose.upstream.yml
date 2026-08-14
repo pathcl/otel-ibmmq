@@ -1,0 +1,23 @@
+# Middle-of-chain scenario: upstream service as the true trace origin.
+#
+# Run with:
+#   docker compose -f docker-compose.yml -f docker-compose.upstream.yml up --build
+
+services:
+  upstream:
+    build:
+      context: ../otel-ibmmq/upstream
+    environment:
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4317
+      GATEWAY_URL: http://gateway:8080/send
+      SERVICE_NAME: upstream
+      REQUIRED_BAGGAGE_KEY: bsi.ep
+    ports:
+      - "8081:8081"
+    depends_on:
+      - gateway
+      - otel-collector
+    restart: on-failure
+
+  traffic-gen:
+    command: ["-url", "http://upstream:8081/order", "-interval", "1s"]

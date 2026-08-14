@@ -21,6 +21,7 @@ Commands:
 Modes (optional, default: sdk):
   sdk     Manual OTel SDK — JmsCarrier, explicit inject/extract, full control
   agent   OTel Java Agent — zero-code JMS instrumentation, JAVA_TOOL_OPTIONS
+  spring  Spring Boot 3 + Micrometer Tracing — @JmsListener, JmsTemplate, no javaagent
 
 Scenarios (optional, default: middle):
   middle  IBM MQ is in the middle — upstream service owns the trace origin
@@ -38,8 +39,11 @@ Examples:
   $0 up origin             # sdk, origin  (backward-compatible)
   $0 up all                # sdk, middle + tutorial Grafana on port 3000
   $0 up agent all          # agent, middle + tutorial Grafana
+  $0 up spring             # spring, middle
+  $0 up spring origin      # spring, origin
   $0 down                  # stop sdk lab
   $0 down agent            # stop agent lab
+  $0 down spring           # stop spring lab
   $0 down all              # stop sdk lab + tutorial Grafana + webpack
 
 Note: ApiExitLocal (C exit at queue manager level) is not a start.sh mode — it
@@ -56,7 +60,7 @@ parse_mode_scenario() {
   SCENARIO="middle"
   for arg in "$@"; do
     case "$arg" in
-      sdk|agent)   MODE="$arg" ;;
+      sdk|agent|spring) MODE="$arg" ;;
       middle|origin|all) SCENARIO="$arg" ;;
       *) echo "Error: unknown argument '$arg'." >&2; usage; exit 1 ;;
     esac
@@ -154,6 +158,10 @@ ALTER QLOCAL(DEV.DEAD.LETTER.QUEUE) PROPCTL(ALL)
     echo "    Note: first build downloads the OTel Java agent jar (~60 MB) — Docker caches it."
     echo "    Span names follow JMS semantic conventions (e.g. 'DEV.QUEUE.1 publish') rather"
     echo "    than the custom names used in sdk mode (e.g. 'gateway.send')."
+  elif [[ "$MODE" == "spring" ]]; then
+    echo ""
+    echo "    Note: OTLP/HTTP on port 4318 (Spring Boot Micrometer default)."
+    echo "    Span names follow Micrometer JMS conventions. No javaagent required."
   fi
 }
 
@@ -219,6 +227,8 @@ parse_mode_scenario "$@"
 # Set LAB_DIR after MODE is resolved.
 if [[ "$MODE" == "agent" ]]; then
   LAB_DIR="$ROOT/labs/otel-ibmmq-agent"
+elif [[ "$MODE" == "spring" ]]; then
+  LAB_DIR="$ROOT/labs/otel-ibmmq-spring"
 else
   LAB_DIR="$ROOT/labs/otel-ibmmq"
 fi
