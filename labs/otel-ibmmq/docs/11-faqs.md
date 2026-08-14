@@ -65,3 +65,56 @@ All languages must agree on MQRFH2 as the carrier. IBM MQ stores JMS string prop
 
 **Impact on this lab**
 All pipeline services (gateway, validator, enricher, processor, dlq-handler) are Java 21 using JMS — they get propagation via `JmsCarrier`, which maps OTel `TextMapSetter`/`TextMapGetter` to `message.setStringProperty` / `message.getStringProperty`. The Go services (upstream, traffic-gen) communicate with gateway over HTTP, not IBM MQ directly. A polyglot service using native MQI would interoperate automatically because W3C header names (`traceparent`, `baggage`) are plain strings that JMS and MQI both store in MQRFH2 `<usr>`.
+
+---
+
+### What are all the approaches for propagating OTel context across IBM MQ?
+
+The three approaches in this lab are not exhaustive. The full landscape, ordered by where in the stack context is injected:
+
+#### 1. Manual OTel SDK (`labs/otel-ibmmq`)
+`JmsCarrier` implements `TextMapSetter`/`TextMapGetter`. Application code calls `propagator.inject()` before every send and `propagator.extract()` after every receive. Full control; most code to write.
+
+#### 2. OTel Java Agent (`labs/otel-ibmmq-agent`)
+`-javaagent:opentelemetry-javaagent.jar` instruments `MessageProducer.send()` and `MessageListener.onMessage()` via bytecode injection. No carrier code; services use `MessageListener` (not `consumer.receive()`) so the agent can propagate context into the callback.
+
+#### 3. Spring JMS + Micrometer Tracing
+Spring Boot 3 with `spring-boot-starter-actuator` propagates context automatically through `JmsTemplate` and `@JmsListener` via Spring's `ObservationRegistry`. No `JmsCarrier`, no javaagent. The most practical path for any existing Spring shop — sits between manual SDK and zero-code agent in terms of effort.
+
+#### 4. Quarkus SmallRye Reactive Messaging
+Quarkus's reactive JMS connector has built-in OTel support. Relevant if the team is already on Quarkus or moving to reactive programming.
+
+#### 5. ApiExitLocal — queue manager C exit (`docs/16-api-exit.md`)
+A C shared library loaded by the queue manager intercepts every `MQPUT`/`MQGET` for all connected applications, regardless of language. Injects `traceparent` for uninstrumented producers (COBOL, C, vendor systems). Cannot carry baggage. No application code changes.
+
+#### 6. IBM MQ Channel Exit
+Same concept as ApiExitLocal but operates at the *channel* level between queue managers in a cluster or hub-and-spoke topology. ApiExitLocal handles the application-to-QM boundary; a channel exit handles the QM-to-QM boundary. Relevant in large multi-QM enterprise deployments.
+
+#### 7. IBM App Connect Enterprise (ACE)
+If an ACE integration flow sits in the message path, ACE can propagate OTel context between its own flow nodes. Common in banks and insurers that already have ACE in the estate.
+
+#### 8. IBM MQ REST API
+IBM MQ 9.1+ exposes a REST endpoint for messaging (`POST /ibmmq/rest/v1/messaging/qmgr/{qmgr}/queue/{queue}/message`). HTTP callers send standard `traceparent` / `baggage` headers — no carrier code needed. Practical for REST-capable producers that cannot be instrumented.
+
+#### 9. MQ → Kafka bridge
+The IBM MQ Kafka Connect connector bridges messages from MQ to Kafka. Kafka's OTel ecosystem is significantly richer (first-class agent, SDK, and Quarkus support). Relevant when the organisation is already migrating toward event streaming or needs Kafka-native observability.
+
+#### 10. Payload embedding
+Embed `traceparent` in the message body (JSON envelope) instead of MQRFH2 headers. Removes the dependency on `PROPCTL(ALL)` entirely and works across any transport. Trade-off: all consumers must understand the envelope; non-standard and invisible to OTel auto-instrumentation.
+
+#### 11. MQMD CorrelId as trace carrier
+Use the 24-byte `CorrelId` field in the MQ Message Descriptor as a simplified trace identifier. Pre-dates W3C TraceContext; carries no baggage and no span flags. Still found in COBOL shops that need *some* correlation without OTel infrastructure.
+
+| Approach | Who instruments | `traceparent` | `baggage` | Code changes | Notes |
+|---|---|---|---|---|---|
+| Manual SDK | Application | Yes | Yes | Yes | Full control |
+| Java Agent | JVM bytecode | Yes | Yes | No | MessageListener required |
+| Spring + Micrometer | Framework | Yes | Yes | Minimal | Best for Spring shops |
+| Quarkus Reactive | Framework | Yes | Yes | Minimal | Reactive / Quarkus only |
+| ApiExitLocal | Queue manager (C) | Yes | No | No | Covers uninstrumented producers |
+| Channel Exit | QM-to-QM channel | Yes | No | No | Multi-QM topologies |
+| ACE flow | Integration middleware | Yes | Partial | No | Requires ACE in path |
+| MQ REST API | HTTP layer | Yes | Yes | No | REST-capable producers only |
+| MQ → Kafka bridge | Architecture | Yes | Yes | Architecture change | Migration path |
+| Payload embedding | Message body | Yes | Yes | Yes | Non-standard; transport-agnostic |
+| CorrelId | MQMD field | Partial | No | No | Legacy; no W3C compliance |
