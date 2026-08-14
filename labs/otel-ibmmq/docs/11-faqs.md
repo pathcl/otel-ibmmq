@@ -1,5 +1,35 @@
 # FAQs
 
+## Instrumentation approaches
+
+### What does "manual OTel SDK" mean, and how does it differ from the other approaches?
+
+"Manual" is the OTel community's own term for the contrast. The official distinction is:
+
+**Automatic instrumentation** — the Java agent instruments bytecode at JVM startup.
+You write zero tracing code. The agent intercepts `MessageProducer.send()` and
+`MessageListener.onMessage()` and handles inject/extract for you.
+
+**Manual instrumentation** — you write all the OTel API calls yourself:
+`tracer.spanBuilder()`, `propagator.inject()`, `JmsCarrier`, `Baggage.builder()`.
+Full control, maximum boilerplate.
+
+**Library / framework instrumentation** — the Spring + Micrometer approach sits
+between the two. You don't write spans from scratch, but you're not zero-code either
+— you still call `tracer.createBaggage()`, `tracer.currentSpan().tag()`, etc. The
+framework does inject/extract; your code does the business-context enrichment.
+
+| OTel term | Lab mode | What you write |
+|---|---|---|
+| Manual instrumentation | `sdk` | Everything: spans, carrier, inject, extract, baggage |
+| Library / framework instrumentation | `spring` | Baggage building + span tagging; framework does inject/extract |
+| Automatic / zero-code instrumentation | `agent` | Nothing for propagation; SpanProcessor or env var needed for baggage → span attrs |
+
+The label "manual SDK" is the right shorthand and is immediately recognisable to
+anyone who has read the OTel documentation.
+
+---
+
 ## Context propagation and baggage
 
 ### Does the IBM MQ usage pattern affect how OpenTelemetry baggage propagation is implemented?
