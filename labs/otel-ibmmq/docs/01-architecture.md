@@ -3,8 +3,9 @@
 ## Problem
 
 Demonstrate OTel baggage propagation across an IBM MQ/JMS async boundary, making
-business context (tenant, user) visible in traces and metrics without modifying
-every service's business logic.
+business context (entry point, channel, customer journey — `bsi.ep`, `bsi.ch`,
+`bsi.cj`) visible in traces and metrics without modifying every service's
+business logic.
 
 ## Component map
 
@@ -12,19 +13,37 @@ every service's business logic.
  ┌──────────────────────────────────────────────────────────────────┐
  │  docker-compose network                                          │
  │                                                                  │
- │  curl /send                                                      │
+ │  curl /order (upstream :8081) or curl /send (gateway :8080)      │
  │     │                                                            │
  │     ▼                                                            │
- │  ┌─────────┐  JMS + OTel headers   ┌────────────┐               │
- │  │ gateway │──────────────────────▶│   ibmmq    │               │
- │  │  :8080  │                       │ QM1        │               │
- │  └────┬────┘                       └─────┬──────┘               │
- │       │ OTLP/gRPC                        │ JMS receive           │
- │       │                          ┌───────▼──────┐               │
- │       │                          │  processor   │               │
- │       │                          └───────┬──────┘               │
- │       │                                  │ OTLP/gRPC             │
- │       ▼                                  ▼                       │
+ │  ┌──────────┐  HTTP + W3C headers  ┌─────────┐                  │
+ │  │ upstream │────────────────────▶│ gateway │                  │
+ │  │  :8081   │  (middle scenario)   │  :8080  │                  │
+ │  └──────────┘                      └────┬────┘                  │
+ │                                         │ JMS PUT DEV.QUEUE.1   │
+ │                                         ▼                        │
+ │                                   ┌──────────┐                  │
+ │                                   │  ibmmq   │ QM1              │
+ │                                   └────┬─────┘                  │
+ │                               ┌────────┴─────────┐              │
+ │                        valid  │                   │ bsi.cj       │
+ │                               ▼                   │ blocked      │
+ │                         ┌─────────┐               ▼              │
+ │                         │validator│         ┌───────────┐        │
+ │                         └────┬────┘         │dlq-handler│        │
+ │                              │              └─────┬─────┘        │
+ │                              ▼ DEV.QUEUE.2        │ OTLP/gRPC   │
+ │                         ┌─────────┐               │              │
+ │                         │ enricher│               │              │
+ │                         └────┬────┘               │              │
+ │                              │ DEV.QUEUE.3        │              │
+ │                              ▼                    │              │
+ │                         ┌─────────┐               │              │
+ │                         │processor│               │              │
+ │                         └────┬────┘               │              │
+ │       all services           │ OTLP/gRPC          │              │
+ │       export spans           └──────┬─────────────┘             │
+ │                                     ▼                            │
  │  ┌──────────────────────────────────────────┐                   │
  │  │           otel-collector :4317           │                   │
  │  └──────────────┬───────────────────────────┘                   │
@@ -44,20 +63,20 @@ every service's business logic.
 ## Data flows
 
 **Trace flow**
-1. gateway creates a span (`gateway.send`, kind=PRODUCER)
-2. gateway injects `traceparent` + `baggage` headers into JMS message properties
-3. IBM MQ delivers the message
-4. processor extracts the headers, creates a child span (`processor.handle`, kind=CONSUMER)
-5. Both spans arrive at otel-collector via OTLP/gRPC
-6. otel-collector forwards to Tempo via OTLP/gRPC
-7. Grafana queries Tempo and shows the full trace with bsi.ep on both spans
+1. upstream (middle scenario) or gateway (origin scenario) creates the root span
+2. gateway injects `traceparent` + `baggage` (`bsi.ep`, `bsi.ch`, `bsi.cj`) into JMS message properties
+3. IBM MQ delivers the message to validator
+4. validator, enricher, and processor each extract headers and create child spans
+5. If `bsi.cj` is in the blocklist, validator routes to DLQ; dlq-handler creates an ERROR span
+6. All services export spans to otel-collector via OTLP/gRPC
+7. otel-collector forwards to Tempo; Grafana queries Tempo showing the full 4–5 span trace
 
 **Metric flow**
 1. processor increments `messages.processed` counter (label: `bsi.ep`)
 2. OTel SDK exports the counter to otel-collector via OTLP/gRPC every 60s
 3. otel-collector exposes the metric on :8889 in Prometheus format
 4. Prometheus scrapes :8889 every 15s
-5. Grafana queries Prometheus for `messages_processed_total` broken down by tenant
+5. Grafana queries Prometheus for `messages_processed_total` broken down by `bsi.ep`
 
 ## Port map
 

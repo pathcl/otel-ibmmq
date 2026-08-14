@@ -1,0 +1,209 @@
+# OTel Java Agent scenario — IBM MQ pipeline with zero-code JMS instrumentation.
+#
+# Run:
+#   docker compose up --build
+#
+# Run with upstream (middle-of-chain):
+#   docker compose -f docker-compose.yml -f docker-compose.upstream.yml up --build
+#
+# What differs from labs/otel-ibmmq:
+#   - All Java services carry -javaagent:/app/otel-agent.jar via JAVA_TOOL_OPTIONS
+#   - No OtelConfig / OtelSdk init in application code
+#   - No JmsCarrier — agent intercepts MessageProducer.send() and MessageConsumer (MessageListener)
+#   - Services use MessageListener instead of consumer.receive() polling, which is how
+#     the agent propagates context into the onMessage() callback correctly
+#   - OTEL_SERVICE_NAME and OTEL_EXPORTER_OTLP_ENDPOINT replace the SDK constructor args
+#
+# Baggage → span attributes (two equivalent approaches):
+#   Approach 1 (default): OTEL_JAVA_EXPERIMENTAL_SPAN_ATTRIBUTES_COPY_FROM_BAGGAGE_INCLUDE
+#     Set in each service environment below. Experimental — may be removed in a future
+#     agent release, but has been stable since agent 1.28.
+#
+#   Approach 2 (stable alternative): custom SpanProcessor extension jar.
+#     1. Build: cd baggage-processor && mvn package -DskipTests
+#     2. Copy target/baggage-processor-1.0.jar into each service image (add COPY to Dockerfile)
+#     3. Change JAVA_TOOL_OPTIONS to:
+#        -javaagent:/app/otel-agent.jar -Dotel.javaagent.extensions=/app/baggage-extension.jar
+#     4. Remove OTEL_JAVA_EXPERIMENTAL_SPAN_ATTRIBUTES_COPY_FROM_BAGGAGE_INCLUDE from env
+#   Both approaches produce identical results; running both simultaneously is also safe.
+
+services:
+  ibmmq:
+    image: icr.io/ibm-messaging/mq:9.4.5.0-r1
+    environment:
+      LICENSE: accept
+      MQ_QMGR_NAME: QM1
+      MQ_APP_PASSWORD: passw0rd
+    ports:
+      - "1414:1414"
+      - "9443:9443"
+    restart: on-failure
+    stop_grace_period: 60s
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.104.0
+    volumes:
+      - ../otel-ibmmq/otel-collector/config.yaml:/etc/otel-collector-config.yaml
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    ports:
+      - "4317:4317"
+      - "8889:8889"
+    depends_on:
+      - tempo
+    restart: on-failure
+
+  tempo:
+    image: grafana/tempo:2.10.7
+    user: root
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ../otel-ibmmq/tempo/tempo.yaml:/etc/tempo.yaml
+      - tempo-data:/tmp/tempo
+    ports:
+      - "3200:3200"
+    restart: on-failure
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ../otel-ibmmq/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.enable-remote-write-receiver'
+      - '--storage.tsdb.retention.time=7d'
+    ports:
+      - "9090:9090"
+    restart: on-failure
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: otel-mq
+    volumes:
+      - ../otel-ibmmq/grafana/provisioning:/etc/grafana/provisioning
+      - ../otel-ibmmq/grafana/dashboards:/var/lib/grafana/dashboards
+      - ../otel-ibmmq/otel-mq-app/dist:/var/lib/grafana/plugins/otel-mq
+    ports:
+      - "3001:3000"
+    depends_on:
+      - tempo
+      - prometheus
+    restart: on-failure
+
+  gateway:
+    build: ./gateway
+    environment:
+      JAVA_TOOL_OPTIONS: -javaagent:/app/otel-agent.jar
+      OTEL_SERVICE_NAME: gateway
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_JAVA_EXPERIMENTAL_SPAN_ATTRIBUTES_COPY_FROM_BAGGAGE_INCLUDE: bsi.ep,bsi.ch,bsi.cj
+      REQUIRED_BAGGAGE_KEY: bsi.ep
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_QUEUE: DEV.QUEUE.1
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+    ports:
+      - "8080:8080"
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+  validator:
+    build: ./validator
+    environment:
+      JAVA_TOOL_OPTIONS: -javaagent:/app/otel-agent.jar
+      OTEL_SERVICE_NAME: validator
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_JAVA_EXPERIMENTAL_SPAN_ATTRIBUTES_COPY_FROM_BAGGAGE_INCLUDE: bsi.ep,bsi.ch,bsi.cj
+      REQUIRED_BAGGAGE_KEY: bsi.ep
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_IN_QUEUE: DEV.QUEUE.1
+      IBM_MQ_NEXT_QUEUE: DEV.QUEUE.2
+      IBM_MQ_DLQ: DEV.DEAD.LETTER.QUEUE
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+  enricher:
+    build: ./enricher
+    environment:
+      JAVA_TOOL_OPTIONS: -javaagent:/app/otel-agent.jar
+      OTEL_SERVICE_NAME: enricher
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_JAVA_EXPERIMENTAL_SPAN_ATTRIBUTES_COPY_FROM_BAGGAGE_INCLUDE: bsi.ep,bsi.ch,bsi.cj
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_IN_QUEUE: DEV.QUEUE.2
+      IBM_MQ_NEXT_QUEUE: DEV.QUEUE.3
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+  processor:
+    build: ./processor
+    environment:
+      JAVA_TOOL_OPTIONS: -javaagent:/app/otel-agent.jar
+      OTEL_SERVICE_NAME: processor
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_JAVA_EXPERIMENTAL_SPAN_ATTRIBUTES_COPY_FROM_BAGGAGE_INCLUDE: bsi.ep,bsi.ch,bsi.cj
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_QUEUE: DEV.QUEUE.3
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+    deploy:
+      replicas: 2
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+  dlq-handler:
+    build: ./dlq-handler
+    environment:
+      JAVA_TOOL_OPTIONS: -javaagent:/app/otel-agent.jar
+      OTEL_SERVICE_NAME: dlq-handler
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_JAVA_EXPERIMENTAL_SPAN_ATTRIBUTES_COPY_FROM_BAGGAGE_INCLUDE: bsi.ep,bsi.ch,bsi.cj
+      IBM_MQ_HOST: ibmmq
+      IBM_MQ_PORT: "1414"
+      IBM_MQ_QUEUE_MANAGER: QM1
+      IBM_MQ_CHANNEL: DEV.APP.SVRCONN
+      IBM_MQ_DLQ: DEV.DEAD.LETTER.QUEUE
+      IBM_MQ_USER: app
+      IBM_MQ_PASSWORD: passw0rd
+    depends_on:
+      - ibmmq
+      - otel-collector
+    restart: on-failure
+
+  traffic-gen:
+    build:
+      context: ../otel-ibmmq/traffic-gen
+    command: ["-url", "http://gateway:8080/send", "-interval", "1s"]
+    depends_on:
+      - gateway
+    restart: on-failure
+
+volumes:
+  tempo-data:

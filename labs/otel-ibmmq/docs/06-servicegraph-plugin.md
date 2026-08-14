@@ -2,7 +2,7 @@
 
 ## What it does
 
-`otel-mq-app` is a Grafana app plugin built with **Grafana Scenes**. It renders a live service graph showing how the `gateway` and `processor` services interact over IBM MQ, filterable by tenant.
+`otel-mq-app` is a Grafana app plugin built with **Grafana Scenes**. It renders a live service graph showing how services interact over IBM MQ, filterable by entry point (`bsi.ep`).
 
 URL: `http://localhost:3001/a/otel-mq-app/home`
 
@@ -21,7 +21,7 @@ Prometheus (remote_write receiver on /api/v1/write)
   ▼
 Grafana Scenes plugin
   │  Tempo serviceMap query   → nodeGraph panel
-  │  Prometheus rate() query  → timeseries panel (filtered by $tenant)
+  │  Prometheus rate() query  → timeseries panel (filtered by $ep)
 ```
 
 ## Tempo config changes (`tempo/tempo.yaml`)
@@ -68,7 +68,7 @@ prometheus:
 EmbeddedScene
 ├── $timeRange    SceneTimeRange (last 1h)
 ├── $variables    SceneVariableSet
-│     └── QueryVariable($tenant)
+│     └── QueryVariable($ep)
 │           datasource: prometheus
 │           query: label_values(traces_service_graph_request_total, bsi_ep)
 │           includeAll: true   → "All" option maps to regex .*
@@ -76,7 +76,7 @@ EmbeddedScene
 │     ├── SceneFlexItem          nodeGraph panel
 │     │     └── $data  SceneQueryRunner (Tempo, queryType: serviceMap)
 │     └── SceneFlexItem          timeseries panel
-│           └── $data  SceneQueryRunner (Prometheus, rate filtered by $tenant)
+│           └── $data  SceneQueryRunner (Prometheus, rate filtered by $ep)
 └── controls      [VariableValueSelectors, SceneTimePicker, SceneRefreshPicker]
 ```
 
@@ -104,7 +104,7 @@ independent and avoids the need for multiple `refId` handling on a shared runner
 allValue: '.*'
 ```
 
-When the user selects "All", Grafana interpolates `$tenant` as `.*`. The Prometheus
+When the user selects "All", Grafana interpolates `$ep` as `.*`. The Prometheus
 query becomes:
 
 ```promql
@@ -113,7 +113,7 @@ sum by (client, server, bsi_ep) (
 )
 ```
 
-which matches every tenant. Selecting `acme` narrows to `bsi_ep=~"checkout"`.
+which matches every entry point. Selecting `acme` narrows to `bsi_ep=~"acme"`.
 
 ## Plugin loading (unsigned)
 
@@ -136,13 +136,15 @@ After changing plugin source, run `npm run build` inside
 ## Sending traffic
 
 ```bash
-# Single tenant
-curl -X POST http://localhost:8080/send -H 'X-bsi-ep: acme' -H 'X-bsi-ch: user1'
+# Single entry point (middle scenario — upstream at :8081)
+curl -X POST http://localhost:8081/order \
+  -H 'X-bsi-ep: checkout' -H 'X-bsi-ch: web' -H 'X-bsi-cj: MoneyTransfer'
 
-# Generate data for multiple tenants
-for t in acme beta gamma; do
+# Generate data for multiple entry points
+for ep in checkout payment account; do
   for i in $(seq 1 10); do
-    curl -s -X POST http://localhost:8080/send -H "X-bsi-ep: $t" -H "X-bsi-ch: user$i"
+    curl -s -X POST http://localhost:8081/order \
+      -H "X-bsi-ep: $ep" -H "X-bsi-ch: web" -H "X-bsi-cj: MoneyTransfer"
   done
 done
 ```

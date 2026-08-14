@@ -57,7 +57,7 @@ simultaneously (tutorial + lab) would conflict. 3001 is the simplest resolution.
 
 ## IBM MQ developer image
 
-**Decision:** `icr.io/ibm-messaging/mq:latest` with `LICENSE=accept`.
+**Decision:** `icr.io/ibm-messaging/mq:9.4.5.0-r1` with `LICENSE=accept`.
 
 The IBM Container Registry (ICR) hosts a free developer edition of IBM MQ. No IBM Cloud
 account or authentication required for pulling — `LICENSE=accept` is the only gate.

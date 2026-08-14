@@ -89,12 +89,16 @@ Every queue in the propagation path must have `PROPCTL(ALL)` — including the D
 If any single queue has the wrong value, MQRFH2 is silently stripped at that hop
 and all downstream services lose their trace context.
 
-Set the queue manager default to cover all new queues automatically:
+`PROPCTL` is a queue attribute — there is no queue-manager-level default.
+Set it on every queue individually:
 ```
-ALTER QMGR PROPCTL(ALL)
+ALTER QLOCAL(DEV.QUEUE.1) PROPCTL(ALL)
+ALTER QLOCAL(DEV.QUEUE.2) PROPCTL(ALL)
+ALTER QLOCAL(DEV.QUEUE.3) PROPCTL(ALL)
+ALTER QLOCAL(DEV.DEAD.LETTER.QUEUE) PROPCTL(ALL)
 ```
 
-Then audit existing queues:
+Audit all queues to find any not set to `ALL`:
 ```
 DISPLAY QLOCAL(*) PROPCTL
 ```
@@ -103,8 +107,8 @@ DISPLAY QLOCAL(*) PROPCTL
 
 ## Do we have to configure PROPCTL on all queues? `#ibmmq` `#o11y`
 
-Yes — every queue the message touches. Set `ALTER QMGR PROPCTL(ALL)` first
-to cover new queues, then fix pre-existing queues individually. Do not forget
+Yes — every queue the message touches. Set `PROPCTL(ALL)` on each queue
+individually (`ALTER QMGR PROPCTL` is not valid MQSC syntax). Do not forget
 the DLQ — that is where you need context most when debugging failures.
 
 If messages cross queue manager boundaries via channels, channels also need
@@ -331,7 +335,7 @@ does not apply.
 
 ### What this means for the lab
 
-`docker-compose.yml` uses `icr.io/ibm-messaging/mq:latest`. On an ARM64 host
+`docker-compose.yml` uses `icr.io/ibm-messaging/mq:9.4.5.0-r1`. On an ARM64 host
 (Apple M1/M2/M3) Docker pulls the ARM64 layer natively. On an amd64 host it
 pulls the amd64 layer. No configuration change is required for either platform.
 
@@ -1104,3 +1108,194 @@ use to attach the value, not whether the application needs to know the value.
 
 The exit's value is purely `traceparent` generation for legacy producers that
 produce no context at all. For baggage, there is no shortcut.
+
+---
+
+## How do you detect whether IBM MQ is being used in a large Java or Go codebase? `#ibmmq`
+
+### Java — dependency signals (fastest check)
+
+```bash
+# Maven
+grep -r "com.ibm.mq" --include="pom.xml" .
+
+# Gradle
+grep -r "ibm.mq\|ibm-mq\|com.ibm.mq" --include="*.gradle" --include="*.gradle.kts" .
+```
+
+Look for:
+- `com.ibm.mq:com.ibm.mq.allclient` — the JMS/MQI client library
+- `com.ibm.mq:mq-jms-spring-boot-starter` — Spring Boot integration
+- `com.ibm.mq:mq-jakarta-client` — Jakarta EE variant
+
+### Java — code-level signals
+
+```bash
+# Connection factory instantiation
+grep -r "MQConnectionFactory\|MQQueueConnectionFactory" --include="*.java" .
+
+# JMS session / destination usage
+grep -r "createQueue\|QueueConnectionFactory" --include="*.java" .
+
+# Direct MQI (lower-level C-style API from Java)
+grep -r "MQPUT\|MQGET\|MQOPEN\|MQCONN" --include="*.java" .
+
+# Queue manager connection string
+grep -r "queueManager\|hostName.*1414\|channel.*SVRCONN" --include="*.java" .
+```
+
+### Go — dependency signals
+
+```bash
+grep -r "ibm-messaging/mq-golang\|mqistr\|ibmmq" go.mod go.sum
+```
+
+The official Go client is `github.com/ibm-messaging/mq-golang`. It exposes:
+
+```bash
+# MQI function calls
+grep -r "ibmmq\.MQPUT\|ibmmq\.MQGET\|ibmmq\.MQOPEN\|ibmmq\.Conn" --include="*.go" .
+
+# Connection descriptor
+grep -r "ibmmq\.MQCD\|ibmmq\.MQCNO\|ibmmq\.MQMD" --include="*.go" .
+```
+
+### Configuration signals (environment and infrastructure)
+
+```bash
+# Docker Compose / Kubernetes manifests
+grep -r "1414\|MQ_QMGR_NAME\|MQSERVER\|ibm-messaging/mq" \
+  --include="*.yml" --include="*.yaml" .
+
+# Environment variables in .env files or CI
+grep -r "MQ_HOST\|MQ_PORT\|MQ_CHANNEL\|MQ_QUEUEMANAGER" .
+```
+
+### Prioritised triage order
+
+1. `pom.xml` / `go.mod` — dependency is definitive; takes 10 seconds
+2. `MQConnectionFactory` / `ibmmq.Conn` calls — shows how connection is established
+3. Queue name strings (`DEV.QUEUE.*`, `QM.*`) — reveals topology
+4. Port 1414 in compose/k8s config — confirms runtime wiring
+
+---
+
+## What are the three instrumentation approaches for IBM MQ + OTel? `#o11y` `#ibmmq`
+
+| Approach | Who instruments | Baggage support | Zero code changes | Works for non-JVM |
+|---|---|---|---|---|
+| **Manual OTel SDK** (JmsCarrier) | Application | Full — all `bsi.*` keys | No | No |
+| **OTel Java Agent** | JVM bytecode | Auto propagation + env var / SpanProcessor for attributes | Yes for tracing | No |
+| **ApiExit (ApiExitLocal/Common)** | Queue manager C exit | `traceparent` only — no baggage | Yes | Yes |
+
+### Manual OTel SDK
+
+Services call `inject()` / `extract()` via `JmsCarrier`. The application owns the
+full W3C stack: traceparent, baggage, span attributes, custom metrics. Full control,
+explicit code, most pedagogically clear.
+
+### OTel Java Agent
+
+Attach `-javaagent:opentelemetry-javaagent.jar` to the JVM. The agent instruments
+JMS calls via bytecode injection — no code changes to the application. Two gaps to
+close manually:
+
+1. **Baggage → span attributes**: The agent propagates whatever is in W3C Baggage but
+   does not promote those values to span attributes automatically. Options:
+   - Set `OTEL_JAVA_EXPERIMENTAL_SPAN_ATTRIBUTES_COPY_FROM_BAGGAGE_INCLUDE=bsi.ep,bsi.ch,bsi.cj`
+   - Register a custom `SpanProcessor` that copies baggage entries on `onStart()`
+
+2. **HTTP header → baggage (entry point)**: Gateway and upstream still need SDK code
+   to read `X-bsi-*` headers and build the `Baggage` object — the agent does not
+   know about your header convention.
+
+These two gaps are not mutually exclusive — you can run both approaches simultaneously
+and the result is idempotent (the attribute is set twice with the same value).
+
+### ApiExitLocal / ApiExitCommon
+
+C shared library loaded by the queue manager. Intercepts `MQPUT` / `MQGET` for all
+applications connected to that QM, regardless of language. Useful for legacy COBOL,
+C batch jobs, or vendor systems you cannot modify. Cannot carry business baggage —
+it has no access to application state at the MQ API boundary.
+
+---
+
+## Are the experimental env var and custom SpanProcessor approaches for baggage→span attributes mutually exclusive? `#o11y`
+
+No. Both can be active simultaneously.
+
+- `OTEL_JAVA_EXPERIMENTAL_SPAN_ATTRIBUTES_COPY_FROM_BAGGAGE_INCLUDE` causes the
+  agent's internal `BaggageSpanProcessor` to copy the listed keys to span attributes
+  on span start.
+- A custom `SpanProcessor` registered via the agent's extension mechanism does the
+  same on `onStart()`.
+
+If both are active, `setAttribute` is called twice for the same key with the same
+value. OTel's `setAttribute` is idempotent — no error, no conflict, no observable
+difference.
+
+### When to use each
+
+| | Experimental env var | Custom SpanProcessor |
+|---|---|---|
+| Setup | One env var | Extension jar on classpath |
+| Stability | Marked experimental — may be removed in future agent versions | Stable OTel SDK API |
+| Flexibility | Fixed copy-only, key list in env var | Can transform, filter, add logic |
+| Debuggability | No code to read | Explicit, readable Java |
+
+For a demo or lab, running both is harmless and shows both techniques. For production,
+pick one. The custom SpanProcessor is the stable long-term choice; the env var is
+convenient for quick evaluation.
+
+---
+
+## How does Tempo turn span attributes like bsi.ep into Prometheus labels for the service graph? `#o11y`
+
+Tempo's `metrics_generator` component pairs producer and consumer spans into service
+graph edges and emits `traces_service_graph_request_total` to Prometheus. By default
+this metric only has `client` and `server` labels.
+
+To promote span attributes into additional Prometheus labels, configure `dimensions`
+in `tempo/tempo.yaml`:
+
+```yaml
+metrics_generator:
+  processor:
+    service_graphs:
+      dimensions:
+        - bsi.ep      # dot → underscore: becomes bsi_ep in Prometheus
+    span_metrics:
+      dimensions:
+        - bsi.ep
+```
+
+With this config, Tempo reads `bsi.ep` from every span and adds it as `bsi_ep` to
+the metric labels. The Grafana variable `$ep` then queries:
+
+```promql
+label_values(traces_service_graph_request_total, bsi_ep)
+```
+
+to populate the dropdown, and the timeseries panel filters by:
+
+```promql
+rate(traces_service_graph_request_total{bsi_ep=~"$ep"}[5m])
+```
+
+### Requirements
+
+- `bsi.ep` must be set as a **span attribute** (not just a baggage entry) — Tempo's
+  metrics_generator reads span attributes, not baggage
+- The attribute name must be on spans produced by **both sides** of a service pair —
+  Tempo pairs a PRODUCER span with its matching CONSUMER span; if only one side has
+  the attribute, the label may be missing or inconsistent
+- `--web.enable-remote-write-receiver` must be set on Prometheus so Tempo can push metrics
+
+### Why this matters for the agent scenario
+
+The OTel Java agent propagates baggage through MQ but does not automatically promote
+baggage entries to span attributes. Without explicitly copying `bsi.ep` from baggage
+to the span, Tempo never sees it and the `bsi_ep` label is absent from the service
+graph metrics. This is the main gap to bridge in the agent scenario — via either the
+experimental env var or a custom `SpanProcessor`.

@@ -7,8 +7,9 @@ passed explicitly as a parameter. Good candidates:
 
 | Key        | Why baggage                                         |
 |------------|-----------------------------------------------------|
-| `bsi.ep` | Every service needs it for isolation and filtering  |
-| `bsi.ch`   | Useful for user-level debugging across services     |
+| `bsi.ep`   | Entry point — every service needs it for isolation and filtering |
+| `bsi.ch`   | Channel — useful for user-level debugging across services |
+| `bsi.cj`   | Customer journey — used by validator to enforce business rules (blocklist) |
 
 ## What does NOT belong in baggage
 
@@ -52,7 +53,7 @@ The Grafana dashboard query uses `bsi_ep` (underscore) to match:
 increase(messages_processed_total[$__rate_interval])
 ```
 
-with legend `tenant={{ bsi_ep }}`.
+with legend `ep={{ bsi_ep }}`.
 
 ## Future: additional dimensions
 

@@ -17,7 +17,7 @@ Two separate things travel over IBM MQ:
 
 ```
 traceparent: 00-<traceId-128bit>-<parentSpanId-64bit>-01
-baggage:     bsi.ep=acme,bsi.ch=user42
+baggage:     bsi.ep=acme,bsi.ch=user42,bsi.cj=MoneyTransfer
 ```
 
 They are **separate propagators** and must both be registered. IBM MQ has no
@@ -102,10 +102,6 @@ correctly but `baggage.getEntryValue("bsi.ep")` returns `null` everywhere.
 > tracing enabled for OTel context propagation to work. The only IBM MQ
 > configuration that matters is `PROPCTL`.
 
-- [ ] `PROPCTL(ALL)` set at **queue manager level** — covers all new queues automatically:
-      ```
-      ALTER QMGR PROPCTL(ALL)
-      ```
 - [ ] `PROPCTL(ALL)` on your **input queue** — without it, upstream properties
       are stripped before your service receives the message
 - [ ] `PROPCTL(ALL)` on your **output queue** — without it, your injected
@@ -217,14 +213,14 @@ dump. Look for:
 ```
 <usr>
   <traceparent>00-aabbcc...ff-0011223344556677-01</traceparent>
-  <baggage>bsi.ep=acme,bsi.ch=user42</baggage>
+  <baggage>bsi.ep=acme,bsi.ch=user42,bsi.cj=MoneyTransfer</baggage>
 </usr>
 ```
 
 If `traceparent` is present but `baggage` is absent: `PROPCTL` is fine but
 the upstream producer is missing `W3CBaggagePropagator` in its SDK config.
 
-In Tempo, query by tenant to verify end-to-end:
+In Tempo, query by entry point to verify end-to-end:
 
 ```
 { span.bsi.ep = "checkout" }
@@ -406,7 +402,7 @@ before. The agent uses its own strategy for this. The SDK lets you be explicit:
 Context extracted = propagator.extract(Context.root(), message, JmsCarrier.GETTER);
 ```
 
-**3. Custom tenant-dimensioned metrics** — the agent creates messaging metrics
+**3. Custom entry-point-dimensioned metrics** — the agent creates messaging metrics
 with fixed attribute names. Getting `messages.processed{bsi.ep="checkout"}` in
 a shape that maps directly to a Grafana variable requires SDK:
 
@@ -424,7 +420,7 @@ only for custom spans and tenant-dimensioned metrics.
 agent flag that automates the manual `span.setAttribute("bsi.ep", ...)` step:
 
 ```bash
-OTEL_JAVA_EXPERIMENTAL_SPAN_ATTRIBUTES_COPY_FROM_BAGGAGE_INCLUDE=bsi.ep,bsi.ch
+OTEL_JAVA_EXPERIMENTAL_SPAN_ATTRIBUTES_COPY_FROM_BAGGAGE_INCLUDE=bsi.ep,bsi.ch,bsi.cj
 ```
 
 With the agent and that flag, every span gets those attributes automatically as
@@ -541,7 +537,7 @@ Look for:
 ```
 <usr>
   <traceparent>00-aabbccdd...</traceparent>
-  <baggage>bsi.ep=acme,bsi.ch=user42</baggage>
+  <baggage>bsi.ep=acme,bsi.ch=user42,bsi.cj=MoneyTransfer</baggage>
 </usr>
 ```
 
@@ -602,7 +598,7 @@ If properties survive you will see the `<usr>` folder in the MQRFH2 output:
 ```
 <usr>
   <traceparent>00-aabbccdd...</traceparent>
-  <baggage>bsi.ep=acme,bsi.ch=user42</baggage>
+  <baggage>bsi.ep=acme,bsi.ch=user42,bsi.cj=MoneyTransfer</baggage>
 </usr>
 ```
 

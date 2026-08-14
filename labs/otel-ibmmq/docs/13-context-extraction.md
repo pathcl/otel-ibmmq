@@ -10,7 +10,7 @@ W3C headers to the HTTP request. Gateway must read those headers, restore the
 OTel context they encode, and then:
 
 1. Start `gateway.send` as a **child** of `upstream.order` (trace continuity).
-2. Forward the original **baggage** (`bsi.ep`, `bsi.ch`) into IBM MQ
+2. Forward the original **baggage** (`bsi.ep`, `bsi.ch`, `bsi.cj`) into IBM MQ
    without overwriting it.
 
 ---
@@ -29,7 +29,7 @@ over a `http.Header` map. The SDK writes two headers:
 
 ```
 traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
-baggage:     bsi.ep=acme,bsi.ch=user42
+baggage:     bsi.ep=acme,bsi.ch=user42,bsi.cj=MoneyTransfer
 ```
 
 Those headers arrive verbatim on the gateway's `HttpExchange`.
@@ -76,10 +76,14 @@ headers when gateway is the entry point (origin scenario):
 ```java
 Baggage upstreamBaggage = Baggage.fromContext(parentCtx);
 String ep = upstreamBaggage.getEntryValue("bsi.ep");
-String ch   = upstreamBaggage.getEntryValue("bsi.ch");
+String ch  = upstreamBaggage.getEntryValue("bsi.ch");
+String cj  = upstreamBaggage.getEntryValue("bsi.cj");
 
 if (ep == null || ep.isBlank()) {
     ep = exchange.getRequestHeaders().getFirst("X-bsi-ep");
+}
+if (cj == null || cj.isBlank()) {
+    cj = exchange.getRequestHeaders().getFirst("X-bsi-cj");
 }
 ```
 
@@ -92,7 +96,8 @@ if (upstreamBaggage.getEntryValue("bsi.ep") != null) {
 } else {
     ctx = Baggage.builder()
         .put("bsi.ep", ep)
-        .put("bsi.ch", ch)
+        .put("bsi.ch", ch != null ? ch : "")
+        .put("bsi.cj", cj != null ? cj : "")
         .build()
         .storeInContext(parentCtx); // origin: create fresh baggage from headers
 }
@@ -132,13 +137,13 @@ upstream/main.go
       │
       │  HTTP headers
       │    traceparent: 00-<trace-id>-<upstream-span-id>-01
-      │    baggage:     bsi.ep=acme,bsi.ch=user42
+      │    baggage:     bsi.ep=acme,bsi.ch=user42,bsi.cj=MoneyTransfer
       ▼
 Gateway.java handle()
   TextMapGetter reads HttpExchange headers
   .extract() → parentCtx
       ├─ parent span  = upstream.order
-      └─ baggage      = {bsi.ep=acme, bsi.ch=user42}
+      └─ baggage      = {bsi.ep=acme, bsi.ch=user42, bsi.cj=MoneyTransfer}
                 │
                 ▼  .setParent(ctx)
           gateway.send  (child of upstream.order, same trace-id)
@@ -146,7 +151,7 @@ Gateway.java handle()
                 ▼  JmsCarrier.SETTER
           JMS message properties
               traceparent → gateway.send span
-              baggage     → bsi.ep=acme,bsi.ch=user42
+              baggage     → bsi.ep=acme,bsi.ch=user42,bsi.cj=MoneyTransfer
                 │
                 ▼
   validator → enricher → processor  (same trace, same baggage)

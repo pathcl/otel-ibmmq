@@ -6,20 +6,20 @@ A Dead Letter Queue (DLQ) is a holding queue for messages that cannot be process
 successfully. Every production IBM MQ deployment has one — it is the single most
 important operational safety net in enterprise messaging.
 
-Without a DLQ, a poison message (bad format, missing field, unknown tenant) would
-either cause the consumer to crash in a loop or be silently dropped. The DLQ makes
-the failure explicit and inspectable.
+Without a DLQ, a poison message (bad format, missing field, blocked customer
+journey) would either cause the consumer to crash in a loop or be silently
+dropped. The DLQ makes the failure explicit and inspectable.
 
 ## Our DLQ setup
 
 ```
 validator
-    │  message fails validation (bsi.ep missing or in blocklist)
+    │  message fails validation (bsi.ep missing OR bsi.cj in blocklist)
     │  PRODUCER → DEV.DEAD.LETTER.QUEUE  (IBM MQ Docker default queue)
     ▼
 dlq-handler     SERVICE_NAME=dlq-handler
     │  CONSUMER ← DEV.DEAD.LETTER.QUEUE
-    │  records rejection counter by tenant + reason
+    │  records rejection counter by bsi.ep + reason
     │  marks span as ERROR (lights up arc__error in node graph)
     └── in production: retry, escalate, or persist for audit
 ```
@@ -99,7 +99,7 @@ one of three things depending on the failure reason:
 | Reason | Action |
 |--------|--------|
 | Transient (MQ unavailable, timeout) | Retry with exponential backoff → DEV.QUEUE.1 |
-| Business rule violation (unknown tenant) | Escalate to manual review queue |
+| Business rule violation (bsi.cj blocked) | Escalate to manual review queue |
 | Poison message (unparseable format) | Persist to database for audit, alert ops team |
 
 The key invariant: **messages never disappear silently**. Every rejection is traced,

@@ -195,7 +195,7 @@ as named properties:
 | Header | What it carries |
 |--------|----------------|
 | `traceparent` | The trace ID and span ID — connects all spans into one trace |
-| `baggage` | Business context — tenant, user ID, order type |
+| `baggage` | Business context — entry point, channel, customer journey (`bsi.ep`, `bsi.ch`, `bsi.cj`) |
 
 These live in the **MQRFH2** header — a structured properties folder that IBM MQ
 attaches to the message body. `amqsbcg` cannot produce this — it is a plain C
@@ -259,7 +259,7 @@ Compare this with the `amqsput` output from Chapter 1:
          ...                                    'e2aad-ebd9d88035'
          ...                                    'b29b9d-01'
          ...                                    '</traceparent></usr>'
-00000130:  6F72 6465 7220 6672 6F6D ...         'order from tenant=acme'
+00000130:  6F72 6465 7220 6672 6F6D ...         'order from ep=checkout'
 ```
 
 The `<usr>` folder is readable directly in the hex dump. No special tool needed —
@@ -268,7 +268,7 @@ The `<usr>` folder is readable directly in the hex dump. No special tool needed 
 The message is no longer anonymous. Now you can answer:
 
 - **Which trace?** — `5252abd8b85544948008007c88de2aad`. Query Tempo for it.
-- **Which tenant?** — `acme`. Scope your investigation immediately.
+- **Which entry point?** — `acme`. Scope your investigation immediately.
 - **Which user?** — `user42`. Cross-reference with your application logs.
 - **Connected spans?** — every service that extracts this context and sets it as
   the parent will appear as a child span in the same trace.
@@ -342,15 +342,9 @@ no properties, OTel extract() returns empty context, and everything downstream
 is an orphan trace. The message is still delivered. The system still runs.
 Nothing in the logs tells you what happened.
 
-**Set a queue manager default first** so every new queue inherits it:
-
-```
-runmqsc QM1
-ALTER QMGR PROPCTL(ALL)
-```
-
-Then audit existing queues — anything already created before this change keeps
-its old value:
+**Set `PROPCTL(ALL)` on every queue in the pipeline** — `PROPCTL` is a queue
+attribute; there is no queue-manager-level default (`ALTER QMGR PROPCTL` is
+not valid MQSC syntax):
 
 ```
 DISPLAY QLOCAL(*) PROPCTL

@@ -26,7 +26,7 @@ validator       SERVICE_NAME=validator
     ▼
 enricher        SERVICE_NAME=enricher
     │  CONSUMER ← DEV.QUEUE.2
-    │  looks up tenant region, generates processing_id
+    │  looks up entry-point region, generates processing_id
     │  PRODUCER → DEV.QUEUE.3
     ▼
 processor       SERVICE_NAME=processor  (two instances — see 09-competing-consumers.md)
@@ -111,10 +111,10 @@ Open any trace in Tempo → expand the `enricher.handle` span → these appear u
 ## Sending traffic
 
 ```bash
-# Valid pipeline messages
-for tenant in acme beta gamma; do
-  curl -X POST http://localhost:8080/send \
-    -H "X-bsi-ep: $tenant" -H "X-bsi-ch: user1"
+# Valid pipeline messages (middle scenario — upstream at :8081)
+for ep in checkout payment account; do
+  curl -X POST http://localhost:8081/order \
+    -H "X-bsi-ep: $ep" -H "X-bsi-ch: web" -H "X-bsi-cj: MoneyTransfer"
 done
 ```
 

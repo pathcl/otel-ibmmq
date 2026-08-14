@@ -494,21 +494,18 @@ composite propagator includes `W3CBaggagePropagator`).
 
 Ask the MQ admin to run:
 ```
-DISPLAY QMGR PROPCTL
 DISPLAY QLOCAL(*) PROPCTL
 DISPLAY CHANNEL(*) PROPCTL
 ```
-Expected output: `PROPCTL(ALL)` for the queue manager, every queue, and every
-channel in the path. `PROPCTL(FORCE)` or `PROPCTL(COMPAT)` with `MQFMT_STRING`
-messages = context will not flow.
+Expected output: `PROPCTL(ALL)` for every queue and channel in the path.
+`PROPCTL(FORCE)` or `PROPCTL(COMPAT)` with `MQFMT_STRING` messages = context
+will not flow.
 
-If the queue manager default is not `ALL`, ask the MQ admin to set it so every
-new queue inherits the correct value automatically:
+`PROPCTL` is a queue attribute — there is no queue-manager-level default.
+Every queue must be set individually:
 ```
-ALTER QMGR PROPCTL(ALL)
+ALTER QLOCAL(<queue-name>) PROPCTL(ALL)
 ```
-Note: this only applies to queues created after the change. All existing queues
-must be audited and fixed individually with `ALTER QLOCAL(<name>) PROPCTL(ALL)`.
 Do not forget the DLQ — context is most valuable when debugging failures.
 
 ### 6.4 MQRFH2 format check

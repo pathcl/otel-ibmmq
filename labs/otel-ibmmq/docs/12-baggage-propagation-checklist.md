@@ -269,7 +269,7 @@ downstream. Each crossing is an independent drop point.
   - Confirm baggage values appear as span attributes in every downstream span
 
 - [ ] **DLQ path test**
-  - Send a message that will be rejected (bad tenant, invalid payload)
+  - Send a message that will be rejected (e.g. `bsi.cj: blocked`)
   - Open the trace — confirm the DLQ handler span is a child of the rejecting service's span, not a new root
 
 - [ ] **Baggage integrity test**

@@ -16,26 +16,10 @@ are flowing end-to-end through an IBM MQ pipeline.
 
 Run these MQSC commands against every queue manager in the message path.
 
-### 1.1 Queue manager default
+### 1.1 All local queues (start here — there is no QM-level PROPCTL default)
 
-```mqsc
-DISPLAY QMGR PROPCTL
-```
-
-| Result | Meaning |
-|--------|---------|
-| `PROPCTL(ALL)` | New queues inherit correct default |
-| `PROPCTL(COMPAT)` | Safe only if every producer is JMS-based |
-| `PROPCTL(NONE)` | All MQRFH2 stripped by default — fix immediately |
-
-Fix:
-```mqsc
-ALTER QMGR PROPCTL(ALL)
-```
-
----
-
-### 1.2 All local queues
+`PROPCTL` is a queue attribute. `ALTER QMGR PROPCTL` is not valid MQSC syntax.
+Every queue must be set individually.
 
 ```mqsc
 DISPLAY QLOCAL(*) PROPCTL
@@ -43,14 +27,14 @@ DISPLAY QLOCAL(*) PROPCTL
 
 Every queue in the pipeline — including the DLQ — must show `PROPCTL(ALL)`.
 
-Fix any queue that does not:
+Fix any queue not showing `ALL`:
 ```mqsc
 ALTER QLOCAL(<queue-name>) PROPCTL(ALL)
 ```
 
 ---
 
-### 1.3 Channels (cross-QM environments only)
+### 1.2 Channels (cross-QM environments only)
 
 ```mqsc
 DISPLAY CHL(*) PROPCTL
@@ -81,7 +65,7 @@ Format : 'MQHRF2  '
 ...
 <usr>
   <traceparent>00-...</traceparent>
-  <baggage>bsi.ep=acme,bsi.ch=user42</baggage>
+  <baggage>bsi.ep=acme,bsi.ch=user42,bsi.cj=MoneyTransfer</baggage>
 </usr>
 ```
 
@@ -132,25 +116,26 @@ grep -r "setParent" src/
 
 ### 2.2 Live smoke test
 
-Send a message with a unique tenant identifier and verify it appears in Tempo
-across all expected services.
+Send a message with a unique entry-point identifier and verify it appears in
+Tempo across all expected services.
 
 ```bash
-TENANT="healthcheck-$(date +%s)"
+EP="healthcheck-$(date +%s)"
 GATEWAY_URL="http://<gateway-host>:<port>"
 TEMPO_URL="http://<tempo-host>:3200"
 
 # Send
 curl -s -X POST "${GATEWAY_URL}/send" \
-  -H "X-bsi-ep: ${TENANT}" \
-  -H "X-bsi-ch: healthcheck"
+  -H "X-bsi-ep: ${EP}" \
+  -H "X-bsi-ch: healthcheck" \
+  -H "X-bsi-cj: probe"
 
 # Wait for spans to flush (adjust to your batch export interval)
 sleep 15
 
 # Query Tempo
 curl -s -G "${TEMPO_URL}/api/search" \
-  --data-urlencode "q={ span.bsi.ep = \"${TENANT}\" }" \
+  --data-urlencode "q={ span.bsi.ep = \"${EP}\" }" \
   --data-urlencode "limit=5"
 ```
 
@@ -160,10 +145,10 @@ Count distinct services in the result:
 python3 - <<'EOF'
 import sys, json, urllib.request, urllib.parse
 
-tenant  = sys.argv[1]
-tempo   = sys.argv[2]
+ep    = sys.argv[1]
+tempo = sys.argv[2]
 
-q  = urllib.parse.urlencode({"q": f'{{ span.bsi.ep = "{tenant}" }}', "limit": "5"})
+q  = urllib.parse.urlencode({"q": f'{{ span.bsi.ep = "{ep}" }}', "limit": "5"})
 r  = urllib.request.urlopen(f"{tempo}/api/search?{q}")
 data = json.loads(r.read())
 
@@ -184,7 +169,7 @@ svcs = {
 }
 print(f"Services in trace ({len(svcs)}): {', '.join(sorted(svcs))}")
 EOF
-"${TENANT}" "${TEMPO_URL}"
+"${EP}" "${TEMPO_URL}"
 ```
 
 **Expected:** all services in the pipeline appear in a single trace.
@@ -215,7 +200,6 @@ EOF
 ```bash
 # MQ admin — full audit in one pass
 runmqsc <QMGR> << 'EOF'
-DISPLAY QMGR PROPCTL
 DISPLAY QLOCAL(*) PROPCTL
 DISPLAY CHL(*) PROPCTL
 EOF
@@ -226,8 +210,8 @@ EOF
 # App team — wiring grep (run from service src root)
 grep -rE "W3CBaggagePropagator|W3CTraceContextPropagator|TextMapSetter|TextMapGetter|\.inject\(|\.extract\(|setParent" src/
 
-# Tempo query by tenant
+# Tempo query by entry point
 curl -s -G http://<tempo>:3200/api/search \
-  --data-urlencode 'q={ span.bsi.ep = "<tenant>" }' \
+  --data-urlencode 'q={ span.bsi.ep = "<ep-value>" }' \
   --data-urlencode "limit=5"
 ```
